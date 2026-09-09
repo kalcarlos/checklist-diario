@@ -1,0 +1,400 @@
+(function () {
+  'use strict';
+
+  var STORAGE_KEY = 'checklist-diario:v1';
+  var EMOJI_CHOICES = ['🏠', '🛒', '💊', '📞', '🧺', '🐶', '💼', '🧹', '🚗', '💰', '🏋️', '📚'];
+
+  var state = null;
+  var currentListId = null;
+
+  // ---------- persistência ----------
+
+  function todayStr() {
+    var d = new Date();
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  }
+
+  function uid() {
+    return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  }
+
+  function seedData() {
+    return {
+      lastResetDate: todayStr(),
+      lists: [
+        {
+          id: uid(), name: 'Casa', emoji: '🏠', type: 'rotina',
+          items: [
+            { id: uid(), text: 'Lavar a louça', done: false },
+            { id: uid(), text: 'Passear com o cachorro', done: false },
+            { id: uid(), text: 'Regar as plantas', done: false }
+          ]
+        },
+        { id: uid(), name: 'Mercado', emoji: '🛒', type: 'lista', items: [] },
+        { id: uid(), name: 'Farmácia', emoji: '💊', type: 'lista', items: [] },
+        { id: uid(), name: 'Ligar / Agendar', emoji: '📞', type: 'lista', items: [] }
+      ]
+    };
+  }
+
+  function load() {
+    var raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) {
+      state = seedData();
+      save();
+      return;
+    }
+    try {
+      state = JSON.parse(raw);
+    } catch (e) {
+      state = seedData();
+    }
+    applyDailyReset();
+  }
+
+  function save() {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  }
+
+  function applyDailyReset() {
+    var today = todayStr();
+    if (state.lastResetDate === today) return;
+    state.lists.forEach(function (list) {
+      if (list.type === 'rotina') {
+        list.items.forEach(function (item) { item.done = false; });
+      }
+    });
+    state.lastResetDate = today;
+    save();
+  }
+
+  // ---------- navegação ----------
+
+  var screenHome = document.getElementById('screen-home');
+  var screenDetail = document.getElementById('screen-detail');
+
+  function showHome() {
+    currentListId = null;
+    screenDetail.classList.add('hidden');
+    screenHome.classList.remove('hidden');
+    renderHome();
+  }
+
+  function showDetail(listId) {
+    currentListId = listId;
+    screenHome.classList.add('hidden');
+    screenDetail.classList.remove('hidden');
+    renderDetail();
+  }
+
+  function getList(id) {
+    return state.lists.find(function (l) { return l.id === id; });
+  }
+
+  // ---------- render: home ----------
+
+  function renderHome() {
+    var container = document.getElementById('lists-container');
+    container.innerHTML = '';
+
+    if (state.lists.length === 0) {
+      var empty = document.createElement('div');
+      empty.className = 'empty-state';
+      empty.textContent = 'Nenhuma lista ainda. Toque no + para criar sua primeira checklist.';
+      container.appendChild(empty);
+      return;
+    }
+
+    state.lists.forEach(function (list) {
+      var total = list.items.length;
+      var done = list.items.filter(function (i) { return i.done; }).length;
+      var pct = total === 0 ? 0 : Math.round((done / total) * 100);
+
+      var card = document.createElement('div');
+      card.className = 'list-card';
+      card.innerHTML =
+        '<div class="emoji">' + list.emoji + '</div>' +
+        '<div class="info">' +
+          '<div class="name"></div>' +
+          '<div class="meta">' + (total === 0 ? 'Sem itens' : (done + ' de ' + total + ' feitos')) +
+            (list.type === 'rotina' ? ' · diária' : '') + '</div>' +
+          '<div class="progress-bar"><div style="width:' + pct + '%"></div></div>' +
+        '</div>';
+      card.querySelector('.name').textContent = list.name;
+      card.addEventListener('click', function () { showDetail(list.id); });
+      container.appendChild(card);
+    });
+  }
+
+  // ---------- render: detalhe ----------
+
+  function renderDetail() {
+    var list = getList(currentListId);
+    if (!list) { showHome(); return; }
+
+    document.getElementById('detail-title').textContent = list.emoji + ' ' + list.name;
+    document.getElementById('detail-hint').textContent = list.type === 'rotina'
+      ? 'Lista diária: os itens desmarcam sozinhos todo dia à meia-noite.'
+      : 'Lista simples: marque os itens e use "Limpar concluídos" quando quiser.';
+
+    var container = document.getElementById('items-container');
+    container.innerHTML = '';
+
+    if (list.items.length === 0) {
+      var li = document.createElement('li');
+      li.className = 'empty-state';
+      li.textContent = 'Nenhum item ainda. Adicione abaixo.';
+      container.appendChild(li);
+      return;
+    }
+
+    list.items.forEach(function (item) {
+      var row = document.createElement('li');
+      row.className = 'item-row' + (item.done ? ' done' : '');
+      row.innerHTML =
+        '<div class="check">' + (item.done ? '✓' : '') + '</div>' +
+        '<div class="text"></div>' +
+        '<button class="delete" aria-label="Excluir">🗑️</button>';
+      row.querySelector('.text').textContent = item.text;
+      row.querySelector('.check').addEventListener('click', function () {
+        item.done = !item.done;
+        save();
+        renderDetail();
+      });
+      row.querySelector('.delete').addEventListener('click', function () {
+        list.items = list.items.filter(function (i) { return i.id !== item.id; });
+        save();
+        renderDetail();
+      });
+      container.appendChild(row);
+    });
+  }
+
+  // ---------- adicionar item ----------
+
+  document.getElementById('add-item-form').addEventListener('submit', function (e) {
+    e.preventDefault();
+    var input = document.getElementById('add-item-input');
+    var text = input.value.trim();
+    if (!text) return;
+    var list = getList(currentListId);
+    list.items.push({ id: uid(), text: text, done: false });
+    input.value = '';
+    save();
+    renderDetail();
+  });
+
+  document.getElementById('btn-back').addEventListener('click', showHome);
+
+  // ---------- modal helper ----------
+
+  var backdrop = document.getElementById('modal-backdrop');
+  var modal = document.getElementById('modal');
+
+  function openModal(html) {
+    modal.innerHTML = html;
+    backdrop.classList.remove('hidden');
+  }
+
+  function closeModal() {
+    backdrop.classList.add('hidden');
+    modal.innerHTML = '';
+  }
+
+  backdrop.addEventListener('click', function (e) {
+    if (e.target === backdrop) closeModal();
+  });
+
+  // ---------- nova lista ----------
+
+  document.getElementById('btn-new-list').addEventListener('click', function () {
+    var chosenEmoji = EMOJI_CHOICES[0];
+    var chosenType = 'lista';
+
+    openModal(
+      '<h2>Nova lista</h2>' +
+      '<label>Nome<input id="m-name" type="text" placeholder="Ex: Academia" maxlength="40"></label>' +
+      '<label>Ícone<div id="m-emojis" class="emoji-row"></div></label>' +
+      '<label>Tipo' +
+        '<div class="type-row">' +
+          '<div class="type-choice" data-type="lista">Lista simples<small>marca e depois você limpa</small></div>' +
+          '<div class="type-choice" data-type="rotina">Rotina diária<small>desmarca sozinha à meia-noite</small></div>' +
+        '</div>' +
+      '</label>' +
+      '<div class="modal-actions">' +
+        '<button id="m-cancel" class="btn btn-secondary">Cancelar</button>' +
+        '<button id="m-create" class="btn btn-primary">Criar</button>' +
+      '</div>'
+    );
+
+    var emojiRow = document.getElementById('m-emojis');
+    EMOJI_CHOICES.forEach(function (em) {
+      var span = document.createElement('span');
+      span.className = 'emoji-choice' + (em === chosenEmoji ? ' selected' : '');
+      span.textContent = em;
+      span.addEventListener('click', function () {
+        chosenEmoji = em;
+        emojiRow.querySelectorAll('.emoji-choice').forEach(function (el) { el.classList.remove('selected'); });
+        span.classList.add('selected');
+      });
+      emojiRow.appendChild(span);
+    });
+
+    modal.querySelectorAll('.type-choice').forEach(function (el) {
+      if (el.dataset.type === chosenType) el.classList.add('selected');
+      el.addEventListener('click', function () {
+        chosenType = el.dataset.type;
+        modal.querySelectorAll('.type-choice').forEach(function (o) { o.classList.remove('selected'); });
+        el.classList.add('selected');
+      });
+    });
+
+    document.getElementById('m-cancel').addEventListener('click', closeModal);
+    document.getElementById('m-create').addEventListener('click', function () {
+      var name = document.getElementById('m-name').value.trim();
+      if (!name) return;
+      state.lists.push({ id: uid(), name: name, emoji: chosenEmoji, type: chosenType, items: [] });
+      save();
+      closeModal();
+      renderHome();
+    });
+
+    document.getElementById('m-name').focus();
+  });
+
+  // ---------- menu da lista (⋯) ----------
+
+  document.getElementById('btn-list-menu').addEventListener('click', function () {
+    var list = getList(currentListId);
+    if (!list) return;
+
+    openModal(
+      '<h2>' + list.emoji + ' ' + escapeHtml(list.name) + '</h2>' +
+      '<button id="m-rename" class="btn btn-secondary">Renomear</button>' +
+      '<button id="m-clear" class="btn btn-secondary">Limpar concluídos</button>' +
+      '<button id="m-delete" class="btn btn-danger">Excluir lista</button>' +
+      '<button id="m-cancel" class="btn btn-secondary">Cancelar</button>'
+    );
+
+    document.getElementById('m-cancel').addEventListener('click', closeModal);
+
+    document.getElementById('m-rename').addEventListener('click', function () {
+      var novo = prompt('Novo nome da lista:', list.name);
+      if (novo && novo.trim()) {
+        list.name = novo.trim();
+        save();
+        closeModal();
+        renderDetail();
+      }
+    });
+
+    document.getElementById('m-clear').addEventListener('click', function () {
+      list.items = list.items.filter(function (i) { return !i.done; });
+      save();
+      closeModal();
+      renderDetail();
+    });
+
+    document.getElementById('m-delete').addEventListener('click', function () {
+      if (confirm('Excluir a lista "' + list.name + '" e todos os seus itens?')) {
+        state.lists = state.lists.filter(function (l) { return l.id !== list.id; });
+        save();
+        closeModal();
+        showHome();
+      }
+    });
+  });
+
+  function escapeHtml(s) {
+    var div = document.createElement('div');
+    div.textContent = s;
+    return div.innerHTML;
+  }
+
+  // ---------- ajustes (exportar / importar) ----------
+
+  document.getElementById('btn-settings').addEventListener('click', function () {
+    openModal(
+      '<h2>Ajustes</h2>' +
+      '<div class="settings-row"><span>Exportar backup (.json)</span><button id="m-export" class="btn btn-secondary" style="flex:none;">Exportar</button></div>' +
+      '<div class="settings-row"><span>Importar backup (.json)</span><button id="m-import" class="btn btn-secondary" style="flex:none;">Importar</button></div>' +
+      '<input id="m-import-file" type="file" accept="application/json" class="hidden" style="display:none;">' +
+      '<p class="hint" style="margin:0;">Os dados ficam salvos só neste iPhone/navegador. Use exportar/importar pra levar pra outro aparelho.</p>' +
+      '<button id="m-cancel" class="btn btn-secondary">Fechar</button>'
+    );
+
+    document.getElementById('m-cancel').addEventListener('click', closeModal);
+
+    document.getElementById('m-export').addEventListener('click', function () {
+      exportData();
+    });
+
+    var fileInput = document.getElementById('m-import-file');
+    document.getElementById('m-import').addEventListener('click', function () {
+      fileInput.click();
+    });
+    fileInput.addEventListener('change', function () {
+      var file = fileInput.files[0];
+      if (!file) return;
+      var reader = new FileReader();
+      reader.onload = function () {
+        try {
+          var parsed = JSON.parse(reader.result);
+          if (!parsed.lists) throw new Error('formato inválido');
+          if (confirm('Isso substitui todos os dados atuais pelos do arquivo. Continuar?')) {
+            state = parsed;
+            if (!state.lastResetDate) state.lastResetDate = todayStr();
+            save();
+            closeModal();
+            showHome();
+          }
+        } catch (e) {
+          alert('Arquivo inválido.');
+        }
+      };
+      reader.readAsText(file);
+    });
+  });
+
+  function exportData() {
+    var json = JSON.stringify(state, null, 2);
+    var blob = new Blob([json], { type: 'application/json' });
+    var file = new File([blob], 'checklist-diario-backup.json', { type: 'application/json' });
+
+    if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+      navigator.share({ files: [file], title: 'Backup do Checklist Diário' }).catch(function () {});
+      return;
+    }
+
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = 'checklist-diario-backup.json';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(function () { URL.revokeObjectURL(url); }, 5000);
+  }
+
+  // ---------- reset diário ao voltar pro app ----------
+
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'visible') {
+      applyDailyReset();
+      if (currentListId) renderDetail(); else renderHome();
+    }
+  });
+
+  // ---------- service worker (offline) ----------
+
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', function () {
+      navigator.serviceWorker.register('service-worker.js').catch(function () {});
+    });
+  }
+
+  // ---------- boot ----------
+
+  load();
+  showHome();
+})();
