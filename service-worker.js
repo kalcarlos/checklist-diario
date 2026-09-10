@@ -1,4 +1,4 @@
-var CACHE_NAME = 'checklist-diario-v1';
+var CACHE_NAME = 'checklist-diario-v2';
 var ASSETS = [
   './',
   './index.html',
