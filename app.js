@@ -4,6 +4,10 @@
   var STORAGE_KEY = 'checklist-diario:v1';
   var EMOJI_CHOICES = ['🏠', '🛒', '💊', '📞', '🧺', '🐶', '💼', '🧹', '🚗', '💰', '🏋️', '📚'];
 
+  // Preencher com a URL do Worker depois de "wrangler deploy" (ex: https://checklist-diario-push.SEU-SUBDOMINIO.workers.dev)
+  var PUSH_SERVER_URL = 'https://checklist-diario-push.kalcarlos.workers.dev';
+  var VAPID_PUBLIC_KEY = 'BGxLxsYdfeBxWWcN37VXpQrfOF5ME3a23FxJSwsayVup0N0ub6OVpDFi8-U6RwvAKLOu1f_BfqsdAaBbIb2Zmsg';
+
   var state = null;
   var currentListId = null;
 
@@ -24,15 +28,16 @@
       lists: [
         {
           id: uid(), name: 'Casa', emoji: '🏠', type: 'rotina',
+          reminder: { enabled: false, time: '08:00' },
           items: [
             { id: uid(), text: 'Lavar a louça', done: false },
             { id: uid(), text: 'Passear com o cachorro', done: false },
             { id: uid(), text: 'Regar as plantas', done: false }
           ]
         },
-        { id: uid(), name: 'Mercado', emoji: '🛒', type: 'lista', items: [] },
-        { id: uid(), name: 'Farmácia', emoji: '💊', type: 'lista', items: [] },
-        { id: uid(), name: 'Ligar / Agendar', emoji: '📞', type: 'lista', items: [] }
+        { id: uid(), name: 'Mercado', emoji: '🛒', type: 'lista', reminder: { enabled: false, time: '08:00' }, items: [] },
+        { id: uid(), name: 'Farmácia', emoji: '💊', type: 'lista', reminder: { enabled: false, time: '08:00' }, items: [] },
+        { id: uid(), name: 'Ligar / Agendar', emoji: '📞', type: 'lista', reminder: { enabled: false, time: '08:00' }, items: [] }
       ]
     };
   }
@@ -49,7 +54,14 @@
     } catch (e) {
       state = seedData();
     }
+    ensureReminderDefaults();
     applyDailyReset();
+  }
+
+  function ensureReminderDefaults() {
+    state.lists.forEach(function (list) {
+      if (!list.reminder) list.reminder = { enabled: false, time: '08:00' };
+    });
   }
 
   function save() {
@@ -253,7 +265,10 @@
     document.getElementById('m-create').addEventListener('click', function () {
       var name = document.getElementById('m-name').value.trim();
       if (!name) return;
-      state.lists.push({ id: uid(), name: name, emoji: chosenEmoji, type: chosenType, items: [] });
+      state.lists.push({
+        id: uid(), name: name, emoji: chosenEmoji, type: chosenType,
+        reminder: { enabled: false, time: '08:00' }, items: []
+      });
       save();
       closeModal();
       renderHome();
@@ -270,11 +285,25 @@
 
     openModal(
       '<h2>' + list.emoji + ' ' + escapeHtml(list.name) + '</h2>' +
+      '<label class="settings-row"><span>Lembrete diário</span>' +
+        '<input id="m-reminder-enabled" type="checkbox"' + (list.reminder.enabled ? ' checked' : '') + '></label>' +
+      '<label class="settings-row"><span>Horário</span>' +
+        '<input id="m-reminder-time" type="time" value="' + list.reminder.time + '"></label>' +
+      '<p class="hint" style="margin:0;">Pra receber esse aviso mesmo com o app fechado, ative "Notificações" em Ajustes.</p>' +
       '<button id="m-rename" class="btn btn-secondary">Renomear</button>' +
       '<button id="m-clear" class="btn btn-secondary">Limpar concluídos</button>' +
       '<button id="m-delete" class="btn btn-danger">Excluir lista</button>' +
-      '<button id="m-cancel" class="btn btn-secondary">Cancelar</button>'
+      '<button id="m-cancel" class="btn btn-secondary">Fechar</button>'
     );
+
+    function saveReminder() {
+      list.reminder.enabled = document.getElementById('m-reminder-enabled').checked;
+      list.reminder.time = document.getElementById('m-reminder-time').value || '08:00';
+      save();
+      syncPushSubscription();
+    }
+    document.getElementById('m-reminder-enabled').addEventListener('change', saveReminder);
+    document.getElementById('m-reminder-time').addEventListener('change', saveReminder);
 
     document.getElementById('m-cancel').addEventListener('click', closeModal);
 
@@ -316,12 +345,19 @@
   document.getElementById('btn-settings').addEventListener('click', function () {
     openModal(
       '<h2>Ajustes</h2>' +
+      '<div class="settings-row"><span>Notificações</span><button id="m-push-toggle" class="btn btn-secondary" style="flex:none;">…</button></div>' +
+      '<p id="m-push-status" class="hint" style="margin:0;"></p>' +
       '<div class="settings-row"><span>Exportar backup (.json)</span><button id="m-export" class="btn btn-secondary" style="flex:none;">Exportar</button></div>' +
       '<div class="settings-row"><span>Importar backup (.json)</span><button id="m-import" class="btn btn-secondary" style="flex:none;">Importar</button></div>' +
       '<input id="m-import-file" type="file" accept="application/json" class="hidden" style="display:none;">' +
       '<p class="hint" style="margin:0;">Os dados ficam salvos só neste iPhone/navegador. Use exportar/importar pra levar pra outro aparelho.</p>' +
       '<button id="m-cancel" class="btn btn-secondary">Fechar</button>'
     );
+
+    refreshPushUI();
+    document.getElementById('m-push-toggle').addEventListener('click', function () {
+      togglePushNotifications();
+    });
 
     document.getElementById('m-cancel').addEventListener('click', closeModal);
 
@@ -344,9 +380,11 @@
           if (confirm('Isso substitui todos os dados atuais pelos do arquivo. Continuar?')) {
             state = parsed;
             if (!state.lastResetDate) state.lastResetDate = todayStr();
+            ensureReminderDefaults();
             save();
             closeModal();
             showHome();
+            syncPushSubscription();
           }
         } catch (e) {
           alert('Arquivo inválido.');
@@ -374,6 +412,127 @@
     a.click();
     document.body.removeChild(a);
     setTimeout(function () { URL.revokeObjectURL(url); }, 5000);
+  }
+
+  // ---------- notificações push (lembretes de verdade) ----------
+
+  function isStandalone() {
+    return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+  }
+
+  function pushSupported() {
+    return 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+  }
+
+  function urlBase64ToUint8Array(base64String) {
+    var padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+    var base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+    var rawData = atob(base64);
+    var outputArray = new Uint8Array(rawData.length);
+    for (var i = 0; i < rawData.length; i++) outputArray[i] = rawData.charCodeAt(i);
+    return outputArray;
+  }
+
+  function buildRemindersPayload() {
+    return state.lists
+      .filter(function (l) { return l.reminder && l.reminder.enabled; })
+      .map(function (l) {
+        return { listId: l.id, listName: l.name, emoji: l.emoji, time: l.reminder.time, enabled: true };
+      });
+  }
+
+  function syncPushSubscription() {
+    if (!pushSupported()) return Promise.resolve();
+    return navigator.serviceWorker.ready.then(function (reg) {
+      return reg.pushManager.getSubscription();
+    }).then(function (sub) {
+      if (!sub) return; // notificações ainda não foram ativadas neste aparelho
+      return fetch(PUSH_SERVER_URL + '/subscribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          subscription: sub.toJSON(),
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+          reminders: buildRemindersPayload()
+        })
+      }).catch(function () {});
+    }).catch(function () {});
+  }
+
+  function enablePushNotifications() {
+    if (!isStandalone()) {
+      alert('Antes de ativar, adicione este app à Tela de Início (Safari → Compartilhar → Adicionar à Tela de Início) e abra por lá.');
+      return Promise.resolve();
+    }
+    return Notification.requestPermission().then(function (permission) {
+      if (permission !== 'granted') {
+        alert('Permissão de notificação negada. Não vai dar pra receber os lembretes.');
+        return;
+      }
+      return navigator.serviceWorker.ready.then(function (reg) {
+        return reg.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
+        });
+      }).then(function () {
+        return syncPushSubscription();
+      });
+    });
+  }
+
+  function disablePushNotifications() {
+    return navigator.serviceWorker.ready.then(function (reg) {
+      return reg.pushManager.getSubscription();
+    }).then(function (sub) {
+      if (!sub) return;
+      var endpoint = sub.endpoint;
+      return sub.unsubscribe().then(function () {
+        return fetch(PUSH_SERVER_URL + '/unsubscribe', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ endpoint: endpoint })
+        }).catch(function () {});
+      });
+    });
+  }
+
+  function togglePushNotifications() {
+    if (!pushSupported()) return;
+    navigator.serviceWorker.ready.then(function (reg) {
+      reg.pushManager.getSubscription().then(function (sub) {
+        var action = sub ? disablePushNotifications() : enablePushNotifications();
+        action.then(refreshPushUI);
+      });
+    });
+  }
+
+  function refreshPushUI() {
+    var btn = document.getElementById('m-push-toggle');
+    var status = document.getElementById('m-push-status');
+    if (!btn || !status) return;
+
+    if (!pushSupported()) {
+      btn.textContent = 'Indisponível';
+      btn.disabled = true;
+      status.textContent = 'Este navegador não suporta notificações push.';
+      return;
+    }
+    if (!isStandalone()) {
+      btn.textContent = 'Ativar';
+      status.textContent = 'Adicione o app à Tela de Início e abra por lá antes de ativar.';
+      return;
+    }
+    navigator.serviceWorker.ready.then(function (reg) {
+      return reg.pushManager.getSubscription();
+    }).then(function (sub) {
+      if (sub) {
+        btn.textContent = 'Desativar';
+        status.textContent = 'Notificações ativadas. Configure o horário em cada lista (⋯).';
+      } else {
+        btn.textContent = 'Ativar';
+        status.textContent = 'Desativadas. Depois de ativar, configure o horário em cada lista (⋯).';
+      }
+    });
   }
 
   // ---------- reset diário ao voltar pro app ----------

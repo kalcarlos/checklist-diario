@@ -1,4 +1,4 @@
-var CACHE_NAME = 'checklist-diario-v2';
+var CACHE_NAME = 'checklist-diario-v3';
 var ASSETS = [
   './',
   './index.html',
@@ -44,6 +44,33 @@ self.addEventListener('fetch', function (event) {
         return response;
       }).catch(function () { return cached; });
       return cached || networkFetch;
+    })
+  );
+});
+
+self.addEventListener('push', function (event) {
+  var data = {};
+  try { data = event.data ? event.data.json() : {}; } catch (e) {}
+  var title = data.title || 'Checklist Diário';
+  event.waitUntil(
+    self.registration.showNotification(title, {
+      body: data.body || 'Hora de checar sua lista.',
+      icon: 'icons/icon-192.png',
+      badge: 'icons/icon-192.png',
+      tag: data.tag || 'checklist-diario',
+      data: { listId: data.listId }
+    })
+  );
+});
+
+self.addEventListener('notificationclick', function (event) {
+  event.notification.close();
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(function (list) {
+      for (var i = 0; i < list.length; i++) {
+        if ('focus' in list[i]) return list[i].focus();
+      }
+      if (self.clients.openWindow) return self.clients.openWindow('./index.html');
     })
   );
 });

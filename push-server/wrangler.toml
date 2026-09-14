@@ -1,0 +1,15 @@
+name = "checklist-diario-push"
+main = "src/index.js"
+compatibility_date = "2024-09-23"
+
+# Roda todo minuto. Plano gratuito da Cloudflare inclui cron triggers.
+[triggers]
+crons = ["* * * * *"]
+
+[[kv_namespaces]]
+binding = "SUBSCRIPTIONS"
+id = "3e5eba5c63854054b83e900a3359538e"
+
+[vars]
+VAPID_PUBLIC_KEY = "BGxLxsYdfeBxWWcN37VXpQrfOF5ME3a23FxJSwsayVup0N0ub6OVpDFi8-U6RwvAKLOu1f_BfqsdAaBbIb2Zmsg"
+VAPID_SUBJECT = "mailto:carloseduardomilanez@gmail.com"

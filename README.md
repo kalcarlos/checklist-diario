@@ -35,6 +35,15 @@ Alternativas igualmente grátis: Cloudflare Pages, Netlify, Vercel. O processo �
 3. Toque em "Adicionar à Tela de Início".
 4. Um ícone do app aparece na tela inicial, abre em tela cheia, funciona offline depois da primeira abertura.
 
+## Lembretes (notificação push de verdade)
+
+Cada lista pode ter um horário de lembrete diário (configurar no menu ⋯ da lista). Pra receber a notificação mesmo com o app fechado, é preciso:
+
+1. Instalar o app na Tela de Início (obrigatório no iPhone — notificação push só funciona em app instalado, não numa aba do Safari).
+2. Abrir pelo ícone da Tela de Início e ativar em Ajustes → Notificações.
+
+Isso funciona graças a um servidor gratuito (Cloudflare Workers) na pasta `push-server/`, que guarda as inscrições e dispara a notificação no horário configurado. Detalhes de deploy em `push-server/README.md` (ou peça pra eu reconfigurar se precisar mudar de conta).
+
 ## Regenerar os ícones
 
 Os ícones ficam em `icons/`. Se quiser mudar a cor ou o desenho, edite `gen-icons.js` e rode:
