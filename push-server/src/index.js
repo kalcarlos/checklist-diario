@@ -1,7 +1,9 @@
-// Servidor de lembretes (Cloudflare Worker).
+// Servidor de lembretes e backup (Cloudflare Worker).
 // Guarda inscricoes de push por lista e dispara notificacao no horario configurado.
 // Implementa Web Push (RFC 8291 / RFC 8292) so com Web Crypto + fetch, sem
 // depender do pacote "web-push" (que usa https/node e nao roda em Workers).
+// Tambem guarda um backup dos dados do checklist por "codigo de sincronizacao",
+// pra recuperar em outro aparelho (rotas /data/save e /data/load).
 
 const ALLOWED_ORIGINS = new Set([
   'https://kalcarlos.github.io',
@@ -189,6 +191,30 @@ async function handleUnsubscribe(request, env) {
   return new Response('ok');
 }
 
+function isValidSyncCode(code) {
+  return typeof code === 'string' && /^[A-Za-z0-9]{6,32}$/.test(code);
+}
+
+async function handleDataSave(request, env) {
+  const body = await request.json();
+  if (!body || !isValidSyncCode(body.code) || typeof body.data !== 'object' || body.data === null) {
+    return new Response('dados invalidos', { status: 400 });
+  }
+  const record = { data: body.data, updatedAt: Date.now() };
+  await env.SUBSCRIPTIONS.put('data:' + body.code, JSON.stringify(record));
+  return new Response('ok');
+}
+
+async function handleDataLoad(request, env) {
+  const body = await request.json();
+  if (!body || !isValidSyncCode(body.code)) {
+    return new Response('dados invalidos', { status: 400 });
+  }
+  const record = await env.SUBSCRIPTIONS.get('data:' + body.code, { type: 'json' });
+  if (!record) return new Response('nao encontrado', { status: 404 });
+  return new Response(JSON.stringify(record), { headers: { 'Content-Type': 'application/json' } });
+}
+
 async function runScheduledCheck(env) {
   const list = await env.SUBSCRIPTIONS.list();
   for (const { name: key } of list.keys) {
@@ -245,6 +271,14 @@ export default {
       }
       if (request.method === 'POST' && url.pathname === '/unsubscribe') {
         const resp = await handleUnsubscribe(request, env);
+        return new Response(resp.body, { status: resp.status, headers: cors });
+      }
+      if (request.method === 'POST' && url.pathname === '/data/save') {
+        const resp = await handleDataSave(request, env);
+        return new Response(resp.body, { status: resp.status, headers: cors });
+      }
+      if (request.method === 'POST' && url.pathname === '/data/load') {
+        const resp = await handleDataLoad(request, env);
         return new Response(resp.body, { status: resp.status, headers: cors });
       }
     } catch (err) {

@@ -2,6 +2,7 @@
   'use strict';
 
   var STORAGE_KEY = 'checklist-diario:v1';
+  var SYNC_CODE_KEY = 'checklist-diario:syncCode';
   var EMOJI_CHOICES = ['🏠', '🛒', '💊', '📞', '🧺', '🐶', '💼', '🧹', '🚗', '💰', '🏋️', '📚'];
 
   // Preencher com a URL do Worker depois de "wrangler deploy" (ex: https://checklist-diario-push.SEU-SUBDOMINIO.workers.dev)
@@ -66,6 +67,7 @@
 
   function save() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    scheduleCloudBackup();
   }
 
   function applyDailyReset() {
@@ -347,14 +349,16 @@
       '<h2>Ajustes</h2>' +
       '<div class="settings-row"><span>Notificações</span><button id="m-push-toggle" class="btn btn-secondary" style="flex:none;">…</button></div>' +
       '<p id="m-push-status" class="hint" style="margin:0;"></p>' +
+      '<div id="m-cloud-box" style="display:flex;flex-direction:column;gap:8px;"></div>' +
+      '<p class="hint" style="margin:0;">O backup na nuvem é gratuito e automático depois de criado, mas não é criptografado com senha — não guarde nada sensível nas listas.</p>' +
       '<div class="settings-row"><span>Exportar backup (.json)</span><button id="m-export" class="btn btn-secondary" style="flex:none;">Exportar</button></div>' +
       '<div class="settings-row"><span>Importar backup (.json)</span><button id="m-import" class="btn btn-secondary" style="flex:none;">Importar</button></div>' +
       '<input id="m-import-file" type="file" accept="application/json" class="hidden" style="display:none;">' +
-      '<p class="hint" style="margin:0;">Os dados ficam salvos só neste iPhone/navegador. Use exportar/importar pra levar pra outro aparelho.</p>' +
       '<button id="m-cancel" class="btn btn-secondary">Fechar</button>'
     );
 
     refreshPushUI();
+    refreshCloudUI();
     document.getElementById('m-push-toggle').addEventListener('click', function () {
       togglePushNotifications();
     });
@@ -412,6 +416,99 @@
     a.click();
     document.body.removeChild(a);
     setTimeout(function () { URL.revokeObjectURL(url); }, 5000);
+  }
+
+  // ---------- backup na nuvem (não perder os dados) ----------
+
+  var cloudBackupTimer = null;
+
+  function getSyncCode() {
+    return localStorage.getItem(SYNC_CODE_KEY);
+  }
+
+  function setSyncCode(code) {
+    localStorage.setItem(SYNC_CODE_KEY, code);
+  }
+
+  function generateSyncCode() {
+    var chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // sem letras/números parecidos (0/O, 1/I/L)
+    var bytes = new Uint8Array(10);
+    crypto.getRandomValues(bytes);
+    var code = '';
+    for (var i = 0; i < bytes.length; i++) code += chars[bytes[i] % chars.length];
+    return code;
+  }
+
+  function scheduleCloudBackup() {
+    if (!getSyncCode()) return; // só faz backup automático depois que o usuário criar um código
+    clearTimeout(cloudBackupTimer);
+    cloudBackupTimer = setTimeout(uploadCloudBackup, 2000);
+  }
+
+  function uploadCloudBackup() {
+    var code = getSyncCode();
+    if (!code) return Promise.resolve();
+    return fetch(PUSH_SERVER_URL + '/data/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code: code, data: state })
+    }).catch(function () {});
+  }
+
+  function downloadCloudBackup(code) {
+    return fetch(PUSH_SERVER_URL + '/data/load', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code: code })
+    }).then(function (resp) {
+      if (!resp.ok) throw new Error(resp.status === 404 ? 'codigo nao encontrado' : 'erro no servidor');
+      return resp.json();
+    }).then(function (record) {
+      return record.data;
+    });
+  }
+
+  function refreshCloudUI() {
+    var box = document.getElementById('m-cloud-box');
+    if (!box) return;
+    var code = getSyncCode();
+    if (code) {
+      box.innerHTML =
+        '<p class="hint" style="margin:0;">Seu código de sincronização (anote e use nos outros aparelhos):</p>' +
+        '<input id="m-cloud-code" type="text" value="' + code + '" readonly ' +
+          'style="font-size:20px;letter-spacing:2px;text-align:center;font-weight:700;">' +
+        '<button id="m-cloud-backup-now" class="btn btn-secondary">Fazer backup agora</button>';
+      document.getElementById('m-cloud-backup-now').addEventListener('click', function () {
+        uploadCloudBackup().then(function () { alert('Backup enviado.'); });
+      });
+    } else {
+      box.innerHTML =
+        '<button id="m-cloud-create" class="btn btn-secondary">Criar backup na nuvem</button>' +
+        '<button id="m-cloud-restore" class="btn btn-secondary">Restaurar de um código</button>';
+      document.getElementById('m-cloud-create').addEventListener('click', function () {
+        setSyncCode(generateSyncCode());
+        uploadCloudBackup();
+        refreshCloudUI();
+      });
+      document.getElementById('m-cloud-restore').addEventListener('click', function () {
+        var code = prompt('Digite o código de sincronização do outro aparelho:');
+        if (!code) return;
+        code = code.trim().toUpperCase();
+        downloadCloudBackup(code).then(function (data) {
+          if (!confirm('Isso substitui todos os dados atuais pelos da nuvem. Continuar?')) return;
+          state = data;
+          ensureReminderDefaults();
+          if (!state.lastResetDate) state.lastResetDate = todayStr();
+          applyDailyReset();
+          save();
+          setSyncCode(code);
+          closeModal();
+          showHome();
+        }).catch(function (err) {
+          alert('Não foi possível restaurar: ' + err.message);
+        });
+      });
+    }
   }
 
   // ---------- notificações push (lembretes de verdade) ----------

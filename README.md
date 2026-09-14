@@ -52,6 +52,8 @@ Os ícones ficam em `icons/`. Se quiser mudar a cor ou o desenho, edite `gen-ico
 node gen-icons.js
 ```
 
-## Limitação importante
+## Backup na nuvem (não perder os dados)
 
-Os dados **não sincronizam sozinhos entre aparelhos** (não tem servidor por trás, é assim que fica de graça). Se quiser usar no iPhone e no computador com os mesmos dados, use o exportar/importar em Ajustes. Se no futuro quiser sincronização automática, dá pra evoluir isso com um backend gratuito (ex: Firebase free tier) — mas aí some a simplicidade de "zero infraestrutura".
+Em Ajustes → "Criar backup na nuvem" gera um código de sincronização e passa a fazer backup automático (Cloudflare KV, mesmo Worker dos lembretes) toda vez que você mexe numa lista. Em outro aparelho, use "Restaurar de um código" com esse mesmo código pra recuperar tudo.
+
+Limitação: não tem senha/criptografia nesse backup, só o código como trava (evite guardar algo sensível nas listas). Também não é sincronização em tempo real entre aparelhos — é "o último que salvou, vale": se editar em dois aparelhos ao mesmo tempo sem sincronizar entre as edições, o último backup sobrescreve o outro.
