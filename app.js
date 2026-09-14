@@ -354,11 +354,21 @@
       '<div class="settings-row"><span>Exportar backup (.json)</span><button id="m-export" class="btn btn-secondary" style="flex:none;">Exportar</button></div>' +
       '<div class="settings-row"><span>Importar backup (.json)</span><button id="m-import" class="btn btn-secondary" style="flex:none;">Importar</button></div>' +
       '<input id="m-import-file" type="file" accept="application/json" class="hidden" style="display:none;">' +
+      '<div class="settings-row"><span>Verificar atualização do app</span><button id="m-check-update" class="btn btn-secondary" style="flex:none;">Verificar</button></div>' +
       '<button id="m-cancel" class="btn btn-secondary">Fechar</button>'
     );
 
     refreshPushUI();
     refreshCloudUI();
+
+    document.getElementById('m-check-update').addEventListener('click', function () {
+      if (!swRegistration) { alert('Ainda carregando, tenta de novo em alguns segundos.'); return; }
+      swRegistration.update().then(function () {
+        alert('Verificado. Se tinha uma versão nova, o app recarrega sozinho em instantes.');
+      }).catch(function () {
+        alert('Não deu pra verificar agora. Tenta mais tarde.');
+      });
+    });
     document.getElementById('m-push-toggle').addEventListener('click', function () {
       togglePushNotifications();
     });
@@ -641,11 +651,31 @@
     }
   });
 
-  // ---------- service worker (offline) ----------
+  // ---------- service worker (offline + autoatualização) ----------
+
+  var swRegistration = null;
 
   if ('serviceWorker' in navigator) {
+    var refreshingAfterUpdate = false;
+    // Quando uma versão nova assume o controle da página, recarrega sozinho
+    // (sem isso, era preciso fechar e reabrir o app duas vezes pra ver uma
+    // atualização, já que ele guarda uma cópia offline de tudo).
+    navigator.serviceWorker.addEventListener('controllerchange', function () {
+      if (refreshingAfterUpdate) return;
+      refreshingAfterUpdate = true;
+      window.location.reload();
+    });
+
     window.addEventListener('load', function () {
-      navigator.serviceWorker.register('service-worker.js').catch(function () {});
+      navigator.serviceWorker.register('service-worker.js').then(function (reg) {
+        swRegistration = reg;
+      }).catch(function () {});
+    });
+
+    document.addEventListener('visibilitychange', function () {
+      if (document.visibilityState === 'visible' && swRegistration) {
+        swRegistration.update().catch(function () {});
+      }
     });
   }
 
