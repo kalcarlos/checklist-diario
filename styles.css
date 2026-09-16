@@ -44,6 +44,7 @@ body {
 }
 
 .screen.hidden { display: none; }
+.hidden { display: none; }
 
 .topbar {
   display: flex;
@@ -211,6 +212,20 @@ body {
   font-size: 18px;
   cursor: pointer;
   padding: 4px 6px;
+}
+
+.suggestion-bar {
+  margin: 0 12px 8px;
+  padding: 10px 12px;
+  background: var(--card-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-shrink: 0;
 }
 
 .add-item-form {

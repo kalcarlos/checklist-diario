@@ -9,6 +9,45 @@
   var PUSH_SERVER_URL = 'https://checklist-diario-push.kalcarlos.workers.dev';
   var VAPID_PUBLIC_KEY = 'BGxLxsYdfeBxWWcN37VXpQrfOF5ME3a23FxJSwsayVup0N0ub6OVpDFi8-U6RwvAKLOu1f_BfqsdAaBbIb2Zmsg';
 
+  // Dicionário inicial pra sugerir lista com base no texto do item. Além
+  // disso o app aprende sozinho com o que você realmente adiciona em cada
+  // lista (ver "sugestão de lista" mais abaixo).
+  var CATEGORY_SEED = {
+    mercado: {
+      name: 'Mercado', emoji: '🛒',
+      hints: ['merc', 'compra', 'supermerc'],
+      words: ['leite', 'pao', 'arroz', 'feijao', 'acucar', 'cafe', 'detergente', 'sabao',
+        'fruta', 'verdura', 'legume', 'carne', 'frango', 'ovo', 'manteiga', 'queijo',
+        'iogurte', 'agua', 'refrigerante', 'cerveja', 'macarrao', 'molho', 'tempero',
+        'sal', 'oleo', 'biscoito', 'bolacha', 'salgadinho', 'chocolate', 'shampoo',
+        'condicionador', 'esponja', 'fosforo', 'pilha', 'racao', 'papel']
+    },
+    farmacia: {
+      name: 'Farmácia', emoji: '💊',
+      hints: ['farm'],
+      words: ['dipirona', 'paracetamol', 'ibuprofeno', 'remedio', 'vitamina', 'curativo',
+        'alcool', 'soro', 'pomada', 'xarope', 'protetor', 'absorvente', 'termometro',
+        'mascara', 'gaze', 'receita', 'antialergico', 'colirio', 'fralda', 'band']
+    },
+    casa: {
+      name: 'Casa', emoji: '🏠',
+      hints: ['casa', 'domestic', 'limpeza'],
+      words: ['lavar', 'louca', 'roupa', 'passar', 'aspirar', 'varrer', 'limpar',
+        'banheiro', 'cozinha', 'lixo', 'regar', 'planta', 'cachorro', 'gato', 'passear',
+        'arrumar', 'cama', 'poeira', 'organizar', 'lencol', 'tapete', 'janela',
+        'geladeira', 'fogao']
+    },
+    contato: {
+      name: 'Ligar / Agendar', emoji: '📞',
+      hints: ['ligar', 'agend', 'contat', 'telefon'],
+      words: ['ligar', 'agendar', 'marcar', 'consulta', 'dentista', 'medico', 'mecanico',
+        'cabeleireiro', 'banco', 'agencia', 'cobranca', 'reuniao', 'entrevista', 'email',
+        'whatsapp', 'encanador', 'eletricista', 'plano', 'seguro']
+    }
+  };
+  var STOPWORDS = ['de', 'da', 'do', 'das', 'dos', 'para', 'pra', 'um', 'uma', 'uns', 'umas',
+    'e', 'o', 'a', 'os', 'as', 'com', 'no', 'na', 'nos', 'nas', 'em', 'ao', 'aos', 'ou', 'que', 'se'];
+
   var state = null;
   var currentListId = null;
 
@@ -23,24 +62,111 @@
     return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   }
 
-  function seedData() {
-    return {
-      lastResetDate: todayStr(),
-      lists: [
-        {
-          id: uid(), name: 'Casa', emoji: '🏠', type: 'rotina',
-          reminder: { enabled: false, time: '08:00' },
-          items: [
-            { id: uid(), text: 'Lavar a louça', done: false },
-            { id: uid(), text: 'Passear com o cachorro', done: false },
-            { id: uid(), text: 'Regar as plantas', done: false }
-          ]
-        },
-        { id: uid(), name: 'Mercado', emoji: '🛒', type: 'lista', reminder: { enabled: false, time: '08:00' }, items: [] },
-        { id: uid(), name: 'Farmácia', emoji: '💊', type: 'lista', reminder: { enabled: false, time: '08:00' }, items: [] },
-        { id: uid(), name: 'Ligar / Agendar', emoji: '📞', type: 'lista', reminder: { enabled: false, time: '08:00' }, items: [] }
-      ]
+  // ---------- sugestão de lista pelo texto do item ----------
+
+  function normalizeAccents(s) {
+    return s.normalize('NFD').replace(/[̀-ͯ]/g, '');
+  }
+
+  function stem(word) {
+    // simplificação bem básica: tira plural terminado em "s" pra casar
+    // "plantas" com "planta", "frutas" com "fruta", etc.
+    if (word.length > 4 && word.charAt(word.length - 1) === 's') return word.slice(0, -1);
+    return word;
+  }
+
+  function tokenize(text) {
+    var norm = normalizeAccents(text.toLowerCase());
+    return norm.split(/[^a-z0-9]+/).filter(function (w) {
+      return w.length >= 3 && STOPWORDS.indexOf(w) === -1;
+    }).map(stem);
+  }
+
+  function learnWord(word, listId, weight) {
+    if (!state.wordListStats[word]) state.wordListStats[word] = {};
+    state.wordListStats[word][listId] = (state.wordListStats[word][listId] || 0) + (weight || 1);
+  }
+
+  function learnFromText(text, listId) {
+    tokenize(text).forEach(function (w) { learnWord(w, listId, 1); });
+  }
+
+  function seedListHints(list) {
+    var normName = normalizeAccents(list.name.toLowerCase());
+    Object.keys(CATEGORY_SEED).forEach(function (cat) {
+      var def = CATEGORY_SEED[cat];
+      var matches = def.hints.some(function (h) { return normName.indexOf(h) !== -1; });
+      if (!matches) return;
+      def.words.forEach(function (w) { learnWord(w, list.id, 2); });
+    });
+  }
+
+  function categoryMatchesListName(catKey, list) {
+    var normName = normalizeAccents(list.name.toLowerCase());
+    return CATEGORY_SEED[catKey].hints.some(function (h) { return normName.indexOf(h) !== -1; });
+  }
+
+  function hasListForCategory(catKey) {
+    return state.lists.some(function (l) { return categoryMatchesListName(catKey, l); });
+  }
+
+  function bestNewCategorySuggestion(words) {
+    var bestKey = null, bestCount = 0;
+    Object.keys(CATEGORY_SEED).forEach(function (catKey) {
+      if (hasListForCategory(catKey)) return; // já existe lista pra essa categoria
+      var count = words.filter(function (w) { return CATEGORY_SEED[catKey].words.indexOf(w) !== -1; }).length;
+      if (count > bestCount) { bestCount = count; bestKey = catKey; }
+    });
+    return bestKey ? { key: bestKey, def: CATEGORY_SEED[bestKey] } : null;
+  }
+
+  function bestSuggestion(text, excludeListId) {
+    var words = tokenize(text);
+    if (words.length === 0) return null;
+    var scores = {};
+    words.forEach(function (w) {
+      var stats = state.wordListStats[w];
+      if (!stats) return;
+      Object.keys(stats).forEach(function (id) {
+        scores[id] = (scores[id] || 0) + stats[id];
+      });
+    });
+    var currentScore = scores[excludeListId] || 0;
+    var bestId = null, bestScore = 0;
+    Object.keys(scores).forEach(function (id) {
+      if (id === excludeListId) return;
+      if (scores[id] > bestScore) { bestScore = scores[id]; bestId = id; }
+    });
+    if (bestId && bestScore > currentScore && bestScore >= 2) return { listId: bestId, score: bestScore };
+    return null;
+  }
+
+  function createList(name, emoji, type) {
+    var list = {
+      id: uid(), name: name, emoji: emoji, type: type,
+      reminder: { enabled: false, time: '08:00' }, items: []
     };
+    seedListHints(list);
+    return list;
+  }
+
+  function seedData() {
+    // createList() usa state.wordListStats pra semear as dicas, então o
+    // state precisa existir (mesmo que vazio) antes de criar as listas.
+    state = { lastResetDate: todayStr(), wordListStats: {}, lists: [] };
+    var casa = createList('Casa', '🏠', 'rotina');
+    casa.items = [
+      { id: uid(), text: 'Lavar a louça', done: false },
+      { id: uid(), text: 'Passear com o cachorro', done: false },
+      { id: uid(), text: 'Regar as plantas', done: false }
+    ];
+    state.lists = [
+      casa,
+      createList('Mercado', '🛒', 'lista'),
+      createList('Farmácia', '💊', 'lista'),
+      createList('Ligar / Agendar', '📞', 'lista')
+    ];
+    return state;
   }
 
   function load() {
@@ -56,6 +182,7 @@
       state = seedData();
     }
     ensureReminderDefaults();
+    ensureWordStatsDefaults();
     applyDailyReset();
   }
 
@@ -63,6 +190,10 @@
     state.lists.forEach(function (list) {
       if (!list.reminder) list.reminder = { enabled: false, time: '08:00' };
     });
+  }
+
+  function ensureWordStatsDefaults() {
+    if (!state.wordListStats) state.wordListStats = {};
   }
 
   function save() {
@@ -98,6 +229,8 @@
     currentListId = listId;
     screenHome.classList.add('hidden');
     screenDetail.classList.remove('hidden');
+    document.getElementById('add-item-input').value = '';
+    hideAddSuggestion();
     renderDetail();
   }
 
@@ -184,7 +317,72 @@
     });
   }
 
-  // ---------- adicionar item ----------
+  // ---------- adicionar item (com sugestão de lista) ----------
+
+  var addSuggestionTimer = null;
+
+  function hideAddSuggestion() {
+    var box = document.getElementById('add-suggestion');
+    box.classList.add('hidden');
+    box.innerHTML = '';
+  }
+
+  function updateAddSuggestion(text) {
+    var box = document.getElementById('add-suggestion');
+    var suggestion = bestSuggestion(text, currentListId);
+    var list = suggestion && getList(suggestion.listId);
+
+    if (list) {
+      box.classList.remove('hidden');
+      box.innerHTML =
+        '💡 Combina mais com <strong>' + list.emoji + ' ' + escapeHtml(list.name) + '</strong> ' +
+        '<button id="add-suggestion-btn" class="btn btn-secondary" style="flex:none;padding:6px 10px;">Adicionar lá</button>';
+
+      document.getElementById('add-suggestion-btn').addEventListener('click', function () {
+        var input = document.getElementById('add-item-input');
+        var text2 = input.value.trim();
+        if (!text2) return;
+        list.items.push({ id: uid(), text: text2, done: false });
+        learnFromText(text2, list.id);
+        save();
+        input.value = '';
+        hideAddSuggestion();
+        renderHome();
+        alert('Adicionado em ' + list.emoji + ' ' + list.name + '.');
+      });
+      return;
+    }
+
+    var words = tokenize(text);
+    var newCat = words.length ? bestNewCategorySuggestion(words) : null;
+    if (!newCat) { hideAddSuggestion(); return; }
+
+    box.classList.remove('hidden');
+    box.innerHTML =
+      '💡 Não achei uma lista pra isso. Criar <strong>' + newCat.def.emoji + ' ' + escapeHtml(newCat.def.name) + '</strong>? ' +
+      '<button id="add-suggestion-btn" class="btn btn-secondary" style="flex:none;padding:6px 10px;">Criar lista</button>';
+
+    document.getElementById('add-suggestion-btn').addEventListener('click', function () {
+      var input = document.getElementById('add-item-input');
+      var text2 = input.value.trim();
+      if (!text2) return;
+      var newList = createList(newCat.def.name, newCat.def.emoji, 'lista');
+      newList.items.push({ id: uid(), text: text2, done: false });
+      learnFromText(text2, newList.id);
+      state.lists.push(newList);
+      save();
+      input.value = '';
+      hideAddSuggestion();
+      renderHome();
+      alert('Lista ' + newCat.def.emoji + ' ' + newCat.def.name + ' criada com o item.');
+    });
+  }
+
+  document.getElementById('add-item-input').addEventListener('input', function () {
+    var val = this.value;
+    clearTimeout(addSuggestionTimer);
+    addSuggestionTimer = setTimeout(function () { updateAddSuggestion(val); }, 250);
+  });
 
   document.getElementById('add-item-form').addEventListener('submit', function (e) {
     e.preventDefault();
@@ -193,7 +391,9 @@
     if (!text) return;
     var list = getList(currentListId);
     list.items.push({ id: uid(), text: text, done: false });
+    learnFromText(text, list.id);
     input.value = '';
+    hideAddSuggestion();
     save();
     renderDetail();
   });
@@ -267,10 +467,7 @@
     document.getElementById('m-create').addEventListener('click', function () {
       var name = document.getElementById('m-name').value.trim();
       if (!name) return;
-      state.lists.push({
-        id: uid(), name: name, emoji: chosenEmoji, type: chosenType,
-        reminder: { enabled: false, time: '08:00' }, items: []
-      });
+      state.lists.push(createList(name, chosenEmoji, chosenType));
       save();
       closeModal();
       renderHome();
@@ -329,6 +526,9 @@
     document.getElementById('m-delete').addEventListener('click', function () {
       if (confirm('Excluir a lista "' + list.name + '" e todos os seus itens?')) {
         state.lists = state.lists.filter(function (l) { return l.id !== list.id; });
+        Object.keys(state.wordListStats).forEach(function (word) {
+          delete state.wordListStats[word][list.id];
+        });
         save();
         closeModal();
         showHome();
@@ -395,6 +595,7 @@
             state = parsed;
             if (!state.lastResetDate) state.lastResetDate = todayStr();
             ensureReminderDefaults();
+            ensureWordStatsDefaults();
             save();
             closeModal();
             showHome();
@@ -508,6 +709,7 @@
           if (!confirm('Isso substitui todos os dados atuais pelos da nuvem. Continuar?')) return;
           state = data;
           ensureReminderDefaults();
+          ensureWordStatsDefaults();
           if (!state.lastResetDate) state.lastResetDate = todayStr();
           applyDailyReset();
           save();
