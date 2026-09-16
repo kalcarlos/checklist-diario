@@ -262,6 +262,8 @@ body {
 .modal {
   background: var(--card);
   width: 100%;
+  max-height: 85vh;
+  overflow-y: auto;
   border-radius: 18px 18px 0 0;
   padding: 20px 20px calc(24px + var(--safe-bottom));
   display: flex;
@@ -295,6 +297,9 @@ body {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+  max-height: 150px;
+  overflow-y: auto;
+  padding-bottom: 2px;
 }
 
 .emoji-choice {

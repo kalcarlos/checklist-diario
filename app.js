@@ -3,7 +3,12 @@
 
   var STORAGE_KEY = 'checklist-diario:v1';
   var SYNC_CODE_KEY = 'checklist-diario:syncCode';
-  var EMOJI_CHOICES = ['🏠', '🛒', '💊', '📞', '🧺', '🐶', '💼', '🧹', '🚗', '💰', '🏋️', '📚'];
+  var EMOJI_CHOICES = [
+    '🏠', '🛒', '💊', '📞', '🧺', '🐶', '🐱', '💼', '🧹', '🚗', '💰', '🏋️',
+    '📚', '🍽️', '🧴', '🪴', '👶', '🎂', '🎁', '✈️', '🏥', '🦷', '👓', '💇',
+    '💅', '🧾', '📦', '🔧', '🔌', '🧑‍💻', '📅', '🐾', '🍎', '🧽', '🛠️', '🎓',
+    '⚽', '🎮', '🎵', '🌱', '🧻', '📮', '🏦', '⛪', '🚲', '🧵', '🐦', '🧯'
+  ];
 
   // Preencher com a URL do Worker depois de "wrangler deploy" (ex: https://checklist-diario-push.SEU-SUBDOMINIO.workers.dev)
   var PUSH_SERVER_URL = 'https://checklist-diario-push.kalcarlos.workers.dev';
