@@ -43,3 +43,18 @@ Copia a URL que aparecer (`https://checklist-diario-push.SEUSUBDOMINIO.workers.d
 
 - Fuso horário: usa o fuso do navegador de quem ativou o lembrete (`Intl.DateTimeFormat().resolvedOptions().timeZone`).
 - Se editar o horário de uma lista no mesmo dia em que o lembrete já disparou, pode repetir o aviso nesse dia (o controle de "já enviei hoje" fica no servidor e é sobrescrito a cada sincronização).
+
+## Contas, listas e login com Google (D1)
+
+O banco `checklist-diario-db` (binding `DB` em `wrangler.toml`) guarda usuários, sessões, listas, membros, convites e vínculos do Google.
+
+```
+npx wrangler d1 execute checklist-diario-db --remote --file=schema.sql
+```
+
+O `schema.sql` é idempotente (`CREATE TABLE IF NOT EXISTS`); rode de novo depois de alterá-lo, e só então `npx wrangler deploy`.
+
+- Rotas: `/auth/register|login|google|logout|me`, `/lists` (GET), `/lists/:id` (PUT/DELETE), `/lists/:id/invites`, `/invites/accept`, `/lists/:id/members/:userId`.
+- Permissões são checadas aqui: dono grava tudo, editor só `items` e `lastResetDate`, leitor recebe 403.
+- Login com Google: `GOOGLE_CLIENT_ID` em `[vars]` deve ser igual ao `GOOGLE_CLIENT_ID` de `../app.js`. As origens do app precisam estar autorizadas no Client ID (Google Cloud → Credenciais).
+- Sessões duram 30 dias; login e cadastro têm limite de tentativas (KV).
