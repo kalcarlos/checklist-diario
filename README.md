@@ -17,7 +17,9 @@ App simples de checklist. Roda no navegador. Instala na tela inicial do iPhone. 
 node serve.js
 ```
 
-Abre `http://localhost:8080` no navegador.
+Abre `http://localhost:4205` no navegador (sobe também no IP da rede local, pra acessar do
+celular). Também é acessível pelo [painel central](../painel-central/README.md), que sobe este
+servidor sob demanda como qualquer outro produto do workspace.
 
 ## Colocar no ar de graça (GitHub Pages)
 

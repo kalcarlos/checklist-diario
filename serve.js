@@ -10,7 +10,7 @@ const MIME = {
 };
 
 const root = __dirname;
-const port = process.env.PORT || 8080;
+const port = process.env.PORT || 4205;
 
 http.createServer((req, res) => {
   let urlPath = decodeURIComponent(req.url.split('?')[0]);
@@ -23,4 +23,4 @@ http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream' });
     res.end(data);
   });
-}).listen(port, () => console.log('servindo em http://localhost:' + port));
+}).listen(port, '0.0.0.0', () => console.log('servindo em http://localhost:' + port));
