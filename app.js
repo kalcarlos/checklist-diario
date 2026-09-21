@@ -6,6 +6,16 @@
   var LAST_SYNC_KEY = 'checklist-diario:lastSyncedAt';
   var CLOUD_POLL_INTERVAL_MS = 20000;
   var TRASH_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+
+  // Ícone de "alça" pra arrastar (SVG em vez de emoji/texto, pra ficar
+  // certinho alinhado com os outros botões). É a forma confiável de
+  // arrastar no toque: "segurar em qualquer lugar" esbarra no gesto
+  // nativo de rolar a tela e o navegador às vezes cancela o toque.
+  var DRAG_ICON =
+    '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">' +
+    '<circle cx="8" cy="5" r="2"/><circle cx="8" cy="12" r="2"/><circle cx="8" cy="19" r="2"/>' +
+    '<circle cx="16" cy="5" r="2"/><circle cx="16" cy="12" r="2"/><circle cx="16" cy="19" r="2"/>' +
+    '</svg>';
   var EMOJI_CHOICES = [
     '🏠', '🛒', '💊', '📞', '🧺', '🐶', '🐱', '💼', '🧹', '🚗', '💰', '🏋️',
     '📚', '🍽️', '🧴', '🪴', '👶', '🎂', '🎁', '✈️', '🏥', '🦷', '👓', '💇',
@@ -58,6 +68,7 @@
 
   var state = null;
   var currentListId = null;
+  var recentDragEndAt = 0; // evita abrir/clicar em algo por engano logo após soltar um arrasto
 
   // ---------- persistência ----------
 
@@ -83,9 +94,12 @@
 
   // ---------- arrastar pra reordenar (funciona com mouse e toque) ----------
 
+  var LONG_PRESS_MS = 380;
+  var LONG_PRESS_MOVE_TOLERANCE = 8;
+
   function setupDragReorder(container, row, handle, arr, item, onDone) {
     row.__item = item;
-    var dragging = false, startY = 0;
+    var dragging = false, startY = 0, suppressNextClick = false;
 
     function clearHighlights() {
       Array.prototype.forEach.call(container.children, function (r) {
@@ -99,6 +113,7 @@
 
     function onMove(e) {
       if (!dragging) return;
+      e.preventDefault(); // segura o scroll da lista enquanto arrasta
       row.style.transform = 'translateY(' + (e.clientY - startY) + 'px)';
       clearHighlights();
       siblingsOf().forEach(function (r) {
@@ -121,6 +136,8 @@
     function endDrag(e) {
       if (!dragging) return;
       dragging = false;
+      suppressNextClick = true;
+      recentDragEndAt = Date.now();
       row.classList.remove('dragging');
       row.style.transform = '';
       row.style.position = '';
@@ -140,19 +157,71 @@
       }
     }
 
-    handle.addEventListener('click', function (e) { e.stopPropagation(); });
-
-    handle.addEventListener('pointerdown', function (e) {
-      e.preventDefault();
-      e.stopPropagation();
+    function beginDrag(clientY) {
       dragging = true;
-      startY = e.clientY;
+      startY = clientY;
       row.classList.add('dragging');
       row.style.position = 'relative';
       row.style.zIndex = '5';
       window.addEventListener('pointermove', onMove);
       window.addEventListener('pointerup', endDrag);
       window.addEventListener('pointercancel', endDrag);
+    }
+
+    // Evita que o clique de "soltar depois de arrastar" também dispare a
+    // navegação/edição por baixo (ex: abrir a lista na home).
+    row.addEventListener('click', function (e) {
+      if (!suppressNextClick) return;
+      suppressNextClick = false;
+      e.stopImmediatePropagation();
+      e.preventDefault();
+    }, true);
+
+    // Alça: arrasta na hora, sem precisar segurar. É o jeito confiável
+    // no toque, porque o "touch-action: none" fica só nela — assim ela
+    // nunca compete com o gesto de rolar a lista.
+    handle.addEventListener('click', function (e) { e.stopPropagation(); });
+    handle.addEventListener('pointerdown', function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      beginDrag(e.clientY);
+    });
+
+    // Bônus: segurar em qualquer outro lugar da linha (fora dos botões)
+    // também arrasta, depois de um toque e segure curto. Funciona bem
+    // com mouse; no toque pode falhar às vezes porque compete com o
+    // gesto nativo de rolar a lista — por isso a alça acima existe.
+    row.addEventListener('pointerdown', function (e) {
+      if (e.target.closest('.drag-handle, .edit-btn, .delete, .check')) return;
+
+      var startX = e.clientX, startYDown = e.clientY;
+      var timer = setTimeout(function () {
+        timer = null;
+        cleanup();
+        beginDrag(startYDown);
+      }, LONG_PRESS_MS);
+
+      function onMoveDuringWait(ev) {
+        if (Math.abs(ev.clientX - startX) > LONG_PRESS_MOVE_TOLERANCE ||
+            Math.abs(ev.clientY - startYDown) > LONG_PRESS_MOVE_TOLERANCE) {
+          clearTimeout(timer);
+          timer = null;
+          cleanup();
+        }
+      }
+      function onUpDuringWait() {
+        clearTimeout(timer);
+        timer = null;
+        cleanup();
+      }
+      function cleanup() {
+        window.removeEventListener('pointermove', onMoveDuringWait);
+        window.removeEventListener('pointerup', onUpDuringWait);
+        window.removeEventListener('pointercancel', onUpDuringWait);
+      }
+      window.addEventListener('pointermove', onMoveDuringWait);
+      window.addEventListener('pointerup', onUpDuringWait);
+      window.addEventListener('pointercancel', onUpDuringWait);
     });
   }
 
@@ -412,7 +481,7 @@
           '<div class="progress-bar"><div style="width:' + pct + '%"></div></div>' +
         '</div>' +
         '<button class="edit-btn" aria-label="Renomear">✏️</button>' +
-        '<button class="drag-handle" aria-label="Arrastar para reordenar">☰</button>' +
+        '<button class="drag-handle" aria-label="Arrastar para reordenar">' + DRAG_ICON + '</button>' +
         '<button class="delete" aria-label="Excluir lista">🗑️</button>';
 
       var nameEl = card.querySelector('.name');
@@ -450,7 +519,10 @@
         renderHome();
       });
 
-      card.addEventListener('click', function () { showDetail(list.id); });
+      card.addEventListener('click', function () {
+        if (Date.now() - recentDragEndAt < 300) return;
+        showDetail(list.id);
+      });
       container.appendChild(card);
       autoGrow(nameEl);
     });
@@ -485,7 +557,7 @@
         '<div class="check">' + (item.done ? '✓' : '') + '</div>' +
         '<textarea class="text" rows="1" readonly></textarea>' +
         '<button class="edit-btn" aria-label="Editar texto">✏️</button>' +
-        '<button class="drag-handle" aria-label="Arrastar para reordenar">☰</button>' +
+        '<button class="drag-handle" aria-label="Arrastar para reordenar">' + DRAG_ICON + '</button>' +
         '<button class="delete" aria-label="Excluir">🗑️</button>';
 
       var textEl = row.querySelector('.text');

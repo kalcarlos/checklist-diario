@@ -230,20 +230,6 @@ body {
   color: var(--text-dim);
 }
 
-.drag-handle {
-  background: none;
-  border: none;
-  color: var(--text-dim);
-  font-size: 15px;
-  line-height: 1;
-  cursor: grab;
-  padding: 2px 4px;
-  flex-shrink: 0;
-  touch-action: none;
-  user-select: none;
-  -webkit-user-select: none;
-}
-
 .edit-btn {
   background: none;
   border: none;
@@ -251,8 +237,30 @@ body {
   font-size: 13px;
   line-height: 1;
   cursor: pointer;
-  padding: 2px 4px;
+  padding: 0 4px;
+  height: 20px;
+  margin-top: 1px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   flex-shrink: 0;
+}
+
+.drag-handle {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  cursor: grab;
+  padding: 0 4px;
+  height: 20px;
+  margin-top: 1px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .item-row .text[readonly],
@@ -281,7 +289,12 @@ body {
   color: var(--text-dim);
   font-size: 15px;
   cursor: pointer;
-  padding: 2px 4px;
+  padding: 0 4px;
+  height: 20px;
+  margin-top: 1px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   flex-shrink: 0;
 }
 
