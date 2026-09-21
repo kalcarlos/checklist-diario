@@ -5,6 +5,7 @@
   var SYNC_CODE_KEY = 'checklist-diario:syncCode';
   var LAST_SYNC_KEY = 'checklist-diario:lastSyncedAt';
   var CLOUD_POLL_INTERVAL_MS = 20000;
+  var TRASH_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
   var EMOJI_CHOICES = [
     '🏠', '🛒', '💊', '📞', '🧺', '🐶', '🐱', '💼', '🧹', '🚗', '💰', '🏋️',
     '📚', '🍽️', '🧴', '🪴', '👶', '🎂', '🎁', '✈️', '🏥', '🦷', '👓', '💇',
@@ -240,7 +241,7 @@
   function seedData() {
     // createList() usa state.wordListStats pra semear as dicas, então o
     // state precisa existir (mesmo que vazio) antes de criar as listas.
-    state = { lastResetDate: todayStr(), wordListStats: {}, lists: [] };
+    state = { lastResetDate: todayStr(), wordListStats: {}, trash: [], lists: [] };
     var casa = createList('Casa', '🏠', 'rotina');
     casa.items = [
       { id: uid(), text: 'Lavar a louça', done: false },
@@ -270,7 +271,9 @@
     }
     ensureReminderDefaults();
     ensureWordStatsDefaults();
+    ensureTrashDefaults();
     applyDailyReset();
+    purgeOldTrash();
   }
 
   function ensureReminderDefaults() {
@@ -281,6 +284,58 @@
 
   function ensureWordStatsDefaults() {
     if (!state.wordListStats) state.wordListStats = {};
+  }
+
+  function ensureTrashDefaults() {
+    if (!state.trash) state.trash = [];
+  }
+
+  function purgeOldTrash() {
+    var cutoff = Date.now() - TRASH_RETENTION_MS;
+    var before = state.trash.length;
+    state.trash = state.trash.filter(function (t) { return t.deletedAt >= cutoff; });
+    if (state.trash.length !== before) save();
+  }
+
+  function moveListToTrash(list) {
+    state.lists = state.lists.filter(function (l) { return l.id !== list.id; });
+    Object.keys(state.wordListStats).forEach(function (word) {
+      delete state.wordListStats[word][list.id];
+    });
+    state.trash.push({ id: uid(), type: 'list', deletedAt: Date.now(), list: list });
+    save();
+  }
+
+  function moveItemToTrash(list, item) {
+    list.items = list.items.filter(function (i) { return i.id !== item.id; });
+    state.trash.push({
+      id: uid(), type: 'item', deletedAt: Date.now(),
+      listId: list.id, listName: list.name, listEmoji: list.emoji, item: item
+    });
+    save();
+  }
+
+  function restoreTrashEntry(entryId) {
+    var idx = state.trash.findIndex(function (t) { return t.id === entryId; });
+    if (idx === -1) return;
+    var entry = state.trash[idx];
+    if (entry.type === 'list') {
+      state.lists.push(entry.list);
+    } else {
+      var list = getList(entry.listId);
+      if (!list) {
+        alert('A lista "' + entry.listName + '" desse item não existe mais. Restaure a lista primeiro, se ela também estiver na lixeira.');
+        return;
+      }
+      list.items.push(entry.item);
+    }
+    state.trash.splice(idx, 1);
+    save();
+  }
+
+  function purgeTrashEntry(entryId) {
+    state.trash = state.trash.filter(function (t) { return t.id !== entryId; });
+    save();
   }
 
   function save() {
@@ -351,29 +406,47 @@
       card.innerHTML =
         '<div class="emoji">' + list.emoji + '</div>' +
         '<div class="info">' +
-          '<textarea class="name" rows="1"></textarea>' +
+          '<textarea class="name" rows="1" readonly></textarea>' +
           '<div class="meta">' + (total === 0 ? 'Sem itens' : (done + ' de ' + total + ' feitos')) +
             (list.type === 'rotina' ? ' · diária' : '') + '</div>' +
           '<div class="progress-bar"><div style="width:' + pct + '%"></div></div>' +
         '</div>' +
-        '<button class="drag-handle" aria-label="Arrastar para reordenar">☰</button>';
+        '<button class="edit-btn" aria-label="Renomear">✏️</button>' +
+        '<button class="drag-handle" aria-label="Arrastar para reordenar">☰</button>' +
+        '<button class="delete" aria-label="Excluir lista">🗑️</button>';
 
       var nameEl = card.querySelector('.name');
       nameEl.value = list.name;
 
-      nameEl.addEventListener('click', function (e) { e.stopPropagation(); });
+      nameEl.addEventListener('click', function (e) {
+        if (!nameEl.readOnly) e.stopPropagation();
+      });
       nameEl.addEventListener('input', function () { autoGrow(nameEl); });
       nameEl.addEventListener('keydown', function (e) {
         if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); nameEl.blur(); }
       });
       nameEl.addEventListener('blur', function () {
+        nameEl.readOnly = true;
         var val = nameEl.value.trim();
         if (!val) { nameEl.value = list.name; return; }
         if (val !== list.name) { list.name = val; save(); }
       });
 
+      card.querySelector('.edit-btn').addEventListener('click', function (e) {
+        e.stopPropagation();
+        nameEl.readOnly = false;
+        nameEl.focus();
+        nameEl.setSelectionRange(nameEl.value.length, nameEl.value.length);
+      });
+
       setupDragReorder(container, card, card.querySelector('.drag-handle'), state.lists, list, function () {
         save();
+        renderHome();
+      });
+
+      card.querySelector('.delete').addEventListener('click', function (e) {
+        e.stopPropagation();
+        moveListToTrash(list);
         renderHome();
       });
 
@@ -410,7 +483,8 @@
       row.className = 'item-row' + (item.done ? ' done' : '');
       row.innerHTML =
         '<div class="check">' + (item.done ? '✓' : '') + '</div>' +
-        '<textarea class="text" rows="1"></textarea>' +
+        '<textarea class="text" rows="1" readonly></textarea>' +
+        '<button class="edit-btn" aria-label="Editar texto">✏️</button>' +
         '<button class="drag-handle" aria-label="Arrastar para reordenar">☰</button>' +
         '<button class="delete" aria-label="Excluir">🗑️</button>';
 
@@ -428,6 +502,7 @@
         if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); textEl.blur(); }
       });
       textEl.addEventListener('blur', function () {
+        textEl.readOnly = true;
         var val = textEl.value.trim();
         if (!val) { textEl.value = item.text; return; }
         if (val !== item.text) {
@@ -437,14 +512,19 @@
         }
       });
 
+      row.querySelector('.edit-btn').addEventListener('click', function () {
+        textEl.readOnly = false;
+        textEl.focus();
+        textEl.setSelectionRange(textEl.value.length, textEl.value.length);
+      });
+
       setupDragReorder(container, row, row.querySelector('.drag-handle'), list.items, item, function () {
         save();
         renderDetail();
       });
 
       row.querySelector('.delete').addEventListener('click', function () {
-        list.items = list.items.filter(function (i) { return i.id !== item.id; });
-        save();
+        moveItemToTrash(list, item);
         renderDetail();
       });
 
@@ -671,12 +751,8 @@
     });
 
     document.getElementById('m-delete').addEventListener('click', function () {
-      if (confirm('Excluir a lista "' + list.name + '" e todos os seus itens?')) {
-        state.lists = state.lists.filter(function (l) { return l.id !== list.id; });
-        Object.keys(state.wordListStats).forEach(function (word) {
-          delete state.wordListStats[word][list.id];
-        });
-        save();
+      if (confirm('Excluir a lista "' + list.name + '"? Fica na lixeira por 7 dias, dá pra restaurar.')) {
+        moveListToTrash(list);
         closeModal();
         showHome();
       }
@@ -688,6 +764,60 @@
     div.textContent = s;
     return div.innerHTML;
   }
+
+  // ---------- lixeira (restaurar exclusões de até 7 dias) ----------
+
+  function renderTrashModal() {
+    purgeOldTrash();
+
+    var itemsHtml = state.trash.length === 0
+      ? '<p class="hint" style="margin:0;">Lixeira vazia.</p>'
+      : state.trash.slice().reverse().map(function (entry) {
+          var daysLeft = Math.max(0, Math.ceil((entry.deletedAt + TRASH_RETENTION_MS - Date.now()) / 86400000));
+          var label = entry.type === 'list'
+            ? entry.list.emoji + ' ' + escapeHtml(entry.list.name) +
+              ' <span style="color:var(--text-dim);font-size:12px;">(lista inteira)</span>'
+            : escapeHtml(entry.item.text) +
+              ' <span style="color:var(--text-dim);font-size:12px;">— ' + entry.listEmoji + ' ' + escapeHtml(entry.listName) + '</span>';
+          return (
+            '<div class="settings-row">' +
+              '<span>' + label + '<br><span class="hint" style="margin:0;">expira em ' + daysLeft + ' dia' + (daysLeft === 1 ? '' : 's') + '</span></span>' +
+              '<span style="display:flex;gap:6px;flex-shrink:0;">' +
+                '<button class="btn btn-secondary trash-restore" data-id="' + entry.id + '" style="flex:none;padding:8px 10px;">Restaurar</button>' +
+                '<button class="btn btn-danger trash-purge" data-id="' + entry.id + '" style="flex:none;padding:8px 10px;">Excluir de vez</button>' +
+              '</span>' +
+            '</div>'
+          );
+        }).join('');
+
+    openModal(
+      '<h2>🗑️ Lixeira</h2>' +
+      '<p class="hint" style="margin:0;">Itens e listas excluídos ficam aqui por 7 dias antes de sumir de vez.</p>' +
+      itemsHtml +
+      '<button id="m-cancel" class="btn btn-secondary">Fechar</button>'
+    );
+
+    document.getElementById('m-cancel').addEventListener('click', closeModal);
+
+    modal.querySelectorAll('.trash-restore').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        restoreTrashEntry(btn.dataset.id);
+        renderTrashModal();
+        renderHome();
+        if (currentListId) renderDetail();
+      });
+    });
+    modal.querySelectorAll('.trash-purge').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        if (confirm('Excluir definitivamente? Não dá pra desfazer.')) {
+          purgeTrashEntry(btn.dataset.id);
+          renderTrashModal();
+        }
+      });
+    });
+  }
+
+  document.getElementById('btn-trash').addEventListener('click', renderTrashModal);
 
   // ---------- ajustes (exportar / importar) ----------
 
@@ -743,6 +873,7 @@
             if (!state.lastResetDate) state.lastResetDate = todayStr();
             ensureReminderDefaults();
             ensureWordStatsDefaults();
+            ensureTrashDefaults();
             save();
             closeModal();
             showHome();
@@ -858,6 +989,7 @@
       state = record.data;
       ensureReminderDefaults();
       ensureWordStatsDefaults();
+      ensureTrashDefaults();
       if (!state.lastResetDate) state.lastResetDate = todayStr();
       applyDailyReset();
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); // não usa save() pra não reenviar pra nuvem
@@ -913,6 +1045,7 @@
           state = record.data;
           ensureReminderDefaults();
           ensureWordStatsDefaults();
+          ensureTrashDefaults();
           if (!state.lastResetDate) state.lastResetDate = todayStr();
           applyDailyReset();
           localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
@@ -1054,6 +1187,7 @@
   document.addEventListener('visibilitychange', function () {
     if (document.visibilityState === 'visible') {
       applyDailyReset();
+      purgeOldTrash();
       if (currentListId) renderDetail(); else renderHome();
       checkCloudForUpdates();
       startCloudPolling();
