@@ -411,7 +411,9 @@ body {
   gap: 6px;
 }
 
-.modal input[type="text"] {
+.modal input[type="text"],
+.modal input[type="password"],
+.modal select {
   background: var(--card-2);
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -512,3 +514,15 @@ body {
 .lock-screen.hidden { display: none; }
 
 .lock-screen .lock-icon { font-size: 48px; }
+
+.add-item-form.hidden { display: none; }
+
+/* contas e compartilhamento */
+.modal .code-box {
+  font-size: 20px;
+  letter-spacing: 2px;
+  text-align: center;
+  font-weight: 700;
+}
+.modal .error-msg { color: var(--danger); font-size: 13px; margin: 0; }
+.modal .small-btn { flex: none; padding: 8px 10px; }

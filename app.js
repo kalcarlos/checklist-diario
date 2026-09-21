@@ -5,6 +5,10 @@
   var SYNC_CODE_KEY = 'checklist-diario:syncCode';
   var LAST_SYNC_KEY = 'checklist-diario:lastSyncedAt';
   var CLOUD_POLL_INTERVAL_MS = 5000;
+  var SESSION_KEY = 'checklist-diario:session';
+  var SKIP_LOGIN_KEY = 'checklist-diario:skipLogin';
+  var PENDING_INVITE_KEY = 'checklist-diario:pendingInvite';
+  var API_URL_KEY = 'checklist-diario:apiUrl'; // só pra testar contra um Worker local
   var TRASH_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 
   // Ícone de "alça" pra arrastar (SVG em vez de emoji/texto, pra ficar
@@ -25,6 +29,7 @@
 
   // Preencher com a URL do Worker depois de "wrangler deploy" (ex: https://checklist-diario-push.SEU-SUBDOMINIO.workers.dev)
   var PUSH_SERVER_URL = 'https://checklist-diario-push.kalcarlos.workers.dev';
+  try { PUSH_SERVER_URL = localStorage.getItem(API_URL_KEY) || PUSH_SERVER_URL; } catch (e) {}
   var VAPID_PUBLIC_KEY = 'BGxLxsYdfeBxWWcN37VXpQrfOF5ME3a23FxJSwsayVup0N0ub6OVpDFi8-U6RwvAKLOu1f_BfqsdAaBbIb2Zmsg';
 
   // Dicionário inicial pra sugerir lista com base no texto do item. Além
@@ -68,6 +73,13 @@
 
   var state = null;
   var currentListId = null;
+
+  var session = null; // { token, username } quando logado
+  try { session = JSON.parse(localStorage.getItem(SESSION_KEY) || 'null'); } catch (e) { session = null; }
+
+  function canEditItems(list) { return !list.role || list.role === 'owner' || list.role === 'editor'; }
+  function canEditMeta(list) { return !list.role || list.role === 'owner'; }
+  var ROLE_LABELS = { owner: 'dono', editor: 'editor', viewer: 'leitor' };
   var itemFilter = 'all'; // 'all' | 'done' | 'pending'
   var recentDragEndAt = 0; // evita abrir/clicar em algo por engano logo após soltar um arrasto
 
@@ -302,8 +314,10 @@
   function createList(name, emoji, type) {
     var list = {
       id: uid(), name: name, emoji: emoji, type: type,
-      reminder: { enabled: false, times: ['08:00'] }, sortOrder: 'manual', items: []
+      reminder: { enabled: false, times: ['08:00'] }, sortOrder: 'manual', items: [],
+      lastResetDate: todayStr()
     };
+    if (session) { list.role = 'owner'; list.rev = 0; list.base = null; list.ownerName = session.username; }
     seedListHints(list);
     return list;
   }
@@ -354,6 +368,7 @@
         delete list.reminder.time;
       }
       if (!list.sortOrder) list.sortOrder = 'manual';
+      if (!list.lastResetDate) list.lastResetDate = state.lastResetDate || todayStr();
     });
   }
 
@@ -395,11 +410,19 @@
     if (idx === -1) return;
     var entry = state.trash[idx];
     if (entry.type === 'list') {
+      // Na nuvem a lista foi apagada de vez: ao restaurar, ela sobe como nova.
+      delete entry.list.members;
+      if (session) enrollList(entry.list);
+      else { delete entry.list.role; delete entry.list.rev; delete entry.list.base; delete entry.list.ownerName; }
       state.lists.push(entry.list);
     } else {
       var list = getList(entry.listId);
       if (!list) {
         alert('A lista "' + entry.listName + '" desse item não existe mais. Restaure a lista primeiro, se ela também estiver na lixeira.');
+        return;
+      }
+      if (!canEditItems(list)) {
+        alert('Você não pode mais editar essa lista.');
         return;
       }
       list.items.push(entry.item);
@@ -416,6 +439,7 @@
   function save() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     scheduleCloudBackup();
+    scheduleAccountSync();
     scheduleReminderSync();
   }
 
@@ -426,16 +450,21 @@
     reminderSyncTimer = setTimeout(function () { syncPushSubscription(); }, 3000);
   }
 
+  // O reset é por lista (lista compartilhada não pode depender do relógio de
+  // um aparelho só). Leitor não mexe: vê o que o servidor mandar.
   function applyDailyReset() {
     var today = todayStr();
-    if (state.lastResetDate === today) return;
+    var changed = false;
     state.lists.forEach(function (list) {
-      if (list.type === 'rotina') {
-        list.items.forEach(function (item) { item.done = false; });
-      }
+      if (list.type !== 'rotina' || list.role === 'viewer') return;
+      if ((list.lastResetDate || state.lastResetDate) === today) return;
+      list.items.forEach(function (item) { item.done = false; });
+      list.lastResetDate = today;
+      changed = true;
     });
     state.lastResetDate = today;
-    save();
+    if (changed) save();
+    else localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   }
 
   // ---------- navegação ----------
@@ -468,6 +497,40 @@
 
   // ---------- render: home ----------
 
+  function roleMeta(list) {
+    if (list.role === 'editor' || list.role === 'viewer') {
+      return ' · 👥 de ' + escapeHtml(list.ownerName || '?') + ' (' + ROLE_LABELS[list.role] + ')';
+    }
+    if (list.role === 'owner' && list.members && list.members.length) return ' · 👥 compartilhada';
+    return '';
+  }
+
+  // Dono exclui (vai pra lixeira); editor/leitor só saem da lista.
+  function removeListWithConfirm(list, done) {
+    if (list.role && list.role !== 'owner') {
+      if (!confirm('Sair da lista "' + list.name + '"? Você perde o acesso a ela.')) return;
+      apiFetch('DELETE', '/lists/' + list.id + '/members/' + session.userId).then(function (res) {
+        if (!res.ok && res.status !== 404) { alert('Não foi possível sair agora. Verifique a conexão.'); return; }
+        state.lists = state.lists.filter(function (l) { return l.id !== list.id; });
+        save();
+        done();
+      }).catch(function () { alert('Não foi possível sair agora. Verifique a conexão.'); });
+      return;
+    }
+    if (list.role === 'owner' && list.rev > 0) {
+      var extra = list.members && list.members.length ? ' Ela some também para os ' + list.members.length + ' membro(s).' : '';
+      if (!confirm('Excluir a lista "' + list.name + '"?' + extra + ' Fica na lixeira por 7 dias neste aparelho.')) return;
+      apiFetch('DELETE', '/lists/' + list.id).then(function (res) {
+        if (!res.ok && res.status !== 404) { alert('Não foi possível excluir agora. Verifique a conexão.'); return; }
+        moveListToTrash(list);
+        done();
+      }).catch(function () { alert('Não foi possível excluir agora. Verifique a conexão.'); });
+      return;
+    }
+    moveListToTrash(list);
+    done();
+  }
+
   function renderHome() {
     var container = document.getElementById('lists-container');
     container.innerHTML = '';
@@ -492,12 +555,13 @@
         '<div class="info">' +
           '<textarea class="name" rows="1" readonly></textarea>' +
           '<div class="meta">' + (total === 0 ? 'Sem itens' : (done + ' de ' + total + ' feitos')) +
-            (list.type === 'rotina' ? ' · diária' : '') + '</div>' +
+            (list.type === 'rotina' ? ' · diária' : '') + roleMeta(list) + '</div>' +
           '<div class="progress-bar"><div style="width:' + pct + '%"></div></div>' +
         '</div>' +
-        '<button class="edit-btn" aria-label="Renomear">✏️</button>' +
+        (canEditMeta(list) ? '<button class="edit-btn" aria-label="Renomear">✏️</button>' : '') +
         '<button class="drag-handle" aria-label="Arrastar para reordenar">' + DRAG_ICON + '</button>' +
-        '<button class="delete" aria-label="Excluir lista">🗑️</button>';
+        '<button class="delete" aria-label="' + (canEditMeta(list) ? 'Excluir lista' : 'Sair da lista') + '">' +
+          (canEditMeta(list) ? '🗑️' : '🚪') + '</button>';
 
       var nameEl = card.querySelector('.name');
       nameEl.value = list.name;
@@ -516,12 +580,15 @@
         if (val !== list.name) { list.name = val; save(); }
       });
 
-      card.querySelector('.edit-btn').addEventListener('click', function (e) {
-        e.stopPropagation();
-        nameEl.readOnly = false;
-        nameEl.focus();
-        nameEl.setSelectionRange(nameEl.value.length, nameEl.value.length);
-      });
+      var editBtn = card.querySelector('.edit-btn');
+      if (editBtn) {
+        editBtn.addEventListener('click', function (e) {
+          e.stopPropagation();
+          nameEl.readOnly = false;
+          nameEl.focus();
+          nameEl.setSelectionRange(nameEl.value.length, nameEl.value.length);
+        });
+      }
 
       setupDragReorder(container, card, card.querySelector('.drag-handle'), state.lists, list, function () {
         save();
@@ -530,8 +597,7 @@
 
       card.querySelector('.delete').addEventListener('click', function (e) {
         e.stopPropagation();
-        moveListToTrash(list);
-        renderHome();
+        removeListWithConfirm(list, renderHome);
       });
 
       card.addEventListener('click', function () {
@@ -550,9 +616,15 @@
     if (!list) { showHome(); return; }
 
     document.getElementById('detail-title').textContent = list.emoji + ' ' + list.name;
-    document.getElementById('detail-hint').textContent = list.type === 'rotina'
+    var editable = canEditItems(list);
+    var hint = list.type === 'rotina'
       ? 'Lista diária: os itens desmarcam sozinhos todo dia à meia-noite.'
       : 'Lista simples: marque os itens e use "Limpar concluídos" quando quiser.';
+    if (list.role === 'viewer') hint = 'Você só pode ver esta lista (dono: ' + (list.ownerName || '?') + ').';
+    else if (list.role === 'editor') hint = 'Você é editor: pode mexer nos itens. Dono: ' + (list.ownerName || '?') + '.';
+    document.getElementById('detail-hint').textContent = hint;
+    document.getElementById('add-item-form').classList.toggle('hidden', !editable);
+    if (!editable) hideAddSuggestion();
 
     document.querySelectorAll('#item-filter .filter-choice').forEach(function (btn) {
       btn.classList.toggle('selected', btn.dataset.filter === itemFilter);
@@ -581,7 +653,7 @@
       visibleItems.sort(function (a, b) { return (a.done === b.done) ? 0 : (a.done ? 1 : -1); });
     }
 
-    var canReorder = itemFilter === 'all' && list.sortOrder === 'manual';
+    var canReorder = editable && itemFilter === 'all' && list.sortOrder === 'manual';
 
     if (visibleItems.length === 0) {
       var liEmpty = document.createElement('li');
@@ -597,12 +669,18 @@
       row.innerHTML =
         '<div class="check">' + (item.done ? '✓' : '') + '</div>' +
         '<textarea class="text" rows="1" readonly></textarea>' +
-        '<button class="edit-btn" aria-label="Editar texto">✏️</button>' +
+        (editable ? '<button class="edit-btn" aria-label="Editar texto">✏️</button>' : '') +
         (canReorder ? '<button class="drag-handle" aria-label="Arrastar para reordenar">' + DRAG_ICON + '</button>' : '') +
-        '<button class="delete" aria-label="Excluir">🗑️</button>';
+        (editable ? '<button class="delete" aria-label="Excluir">🗑️</button>' : '');
 
       var textEl = row.querySelector('.text');
       textEl.value = item.text;
+
+      if (!editable) {
+        container.appendChild(row);
+        autoGrow(textEl);
+        return;
+      }
 
       row.querySelector('.check').addEventListener('click', function () {
         item.done = !item.done;
@@ -662,6 +740,7 @@
     var box = document.getElementById('add-suggestion');
     var suggestion = bestSuggestion(text, currentListId);
     var list = suggestion && getList(suggestion.listId);
+    if (list && !canEditItems(list)) list = null;
 
     if (list) {
       box.classList.remove('hidden');
@@ -881,35 +960,56 @@
     });
   }
 
+  function on(id, fn) {
+    var el = document.getElementById(id);
+    if (el) el.addEventListener('click', fn);
+  }
+
   function openListMenu(list) {
     document.getElementById('detail-title').textContent = list.emoji + ' ' + list.name;
 
     var SORT_LABELS = { manual: 'Manual (arrastar)', alpha: 'Alfabética', 'pending-first': 'Pendentes primeiro' };
     var SORT_NEXT = { manual: 'alpha', alpha: 'pending-first', 'pending-first': 'manual' };
+    var isMeta = canEditMeta(list);
+    var isItems = canEditItems(list);
 
-    openModal(
-      '<h2>' + list.emoji + ' ' + escapeHtml(list.name) + '</h2>' +
-      '<label class="settings-row"><span>Lembrete diário</span>' +
-        '<input id="m-reminder-enabled" type="checkbox"' + (list.reminder.enabled ? ' checked' : '') + '></label>' +
-      '<div id="m-reminder-times"></div>' +
-      '<button id="m-add-time" class="btn btn-secondary" style="padding:8px;">+ Adicionar horário</button>' +
-      '<p class="hint" style="margin:0;">Pra receber esse aviso mesmo com o app fechado, ative "Notificações" em Ajustes. Não avisa se a lista já estiver toda feita.</p>' +
-      '<div class="settings-row"><span>Ícone</span><button id="m-change-icon" class="btn btn-secondary" style="flex:none;">' + list.emoji + ' Trocar</button></div>' +
-      '<div class="settings-row"><span>Tipo</span><button id="m-change-type" class="btn btn-secondary" style="flex:none;">' +
-        (list.type === 'rotina' ? 'Rotina diária' : 'Lista simples') + '</button></div>' +
-      '<div class="settings-row"><span>Ordenar por</span><button id="m-sort-order" class="btn btn-secondary" style="flex:none;">' +
-        SORT_LABELS[list.sortOrder] + '</button></div>' +
-      '<button id="m-rename" class="btn btn-secondary">Renomear</button>' +
-      '<button id="m-share" class="btn btn-secondary">Compartilhar</button>' +
-      '<button id="m-check-all" class="btn btn-secondary">Marcar todos</button>' +
-      '<button id="m-uncheck-all" class="btn btn-secondary">Desmarcar todos</button>' +
-      '<button id="m-clear" class="btn btn-secondary">Limpar concluídos</button>' +
-      '<button id="m-delete" class="btn btn-danger">Excluir lista</button>' +
-      '<button id="m-cancel" class="btn btn-secondary">Fechar</button>'
-    );
+    var html = '<h2>' + list.emoji + ' ' + escapeHtml(list.name) + '</h2>';
+    if (isMeta) {
+      html +=
+        '<label class="settings-row"><span>Lembrete diário</span>' +
+          '<input id="m-reminder-enabled" type="checkbox"' + (list.reminder.enabled ? ' checked' : '') + '></label>' +
+        '<div id="m-reminder-times"></div>' +
+        '<button id="m-add-time" class="btn btn-secondary" style="padding:8px;">+ Adicionar horário</button>' +
+        '<p class="hint" style="margin:0;">Pra receber esse aviso mesmo com o app fechado, ative "Notificações" em Ajustes. Não avisa se a lista já estiver toda feita.</p>' +
+        '<div class="settings-row"><span>Ícone</span><button id="m-change-icon" class="btn btn-secondary" style="flex:none;">' + list.emoji + ' Trocar</button></div>' +
+        '<div class="settings-row"><span>Tipo</span><button id="m-change-type" class="btn btn-secondary" style="flex:none;">' +
+          (list.type === 'rotina' ? 'Rotina diária' : 'Lista simples') + '</button></div>' +
+        '<div class="settings-row"><span>Ordenar por</span><button id="m-sort-order" class="btn btn-secondary" style="flex:none;">' +
+          SORT_LABELS[list.sortOrder] + '</button></div>' +
+        '<button id="m-rename" class="btn btn-secondary">Renomear</button>';
+    }
+    if (list.role) {
+      html += '<button id="m-members" class="btn btn-secondary">' +
+        (list.role === 'owner' ? '👥 Compartilhar com pessoas' : '👥 Ver membros') + '</button>';
+    } else if (isMeta) {
+      html += '<button id="m-members-local" class="btn btn-secondary">👥 Compartilhar com pessoas</button>';
+    }
+    html += '<button id="m-share" class="btn btn-secondary">Copiar como texto</button>';
+    if (isItems) {
+      html +=
+        '<button id="m-check-all" class="btn btn-secondary">Marcar todos</button>' +
+        '<button id="m-uncheck-all" class="btn btn-secondary">Desmarcar todos</button>' +
+        '<button id="m-clear" class="btn btn-secondary">Limpar concluídos</button>';
+    }
+    html += isMeta
+      ? '<button id="m-delete" class="btn btn-danger">Excluir lista</button>'
+      : '<button id="m-delete" class="btn btn-danger">Sair da lista</button>';
+    html += '<button id="m-cancel" class="btn btn-secondary">Fechar</button>';
+    openModal(html);
 
     function renderTimesList() {
       var box = document.getElementById('m-reminder-times');
+      if (!box) return;
       box.innerHTML = list.reminder.times.map(function (t, idx) {
         return '<div class="settings-row">' +
           '<input type="time" class="m-time-input" data-idx="' + idx + '" value="' + t + '">' +
@@ -934,38 +1034,38 @@
     }
     renderTimesList();
 
-    document.getElementById('m-add-time').addEventListener('click', function () {
+    on('m-add-time', function () {
       list.reminder.times.push('08:00');
       save();
       renderTimesList();
     });
 
-    document.getElementById('m-reminder-enabled').addEventListener('change', function () {
-      list.reminder.enabled = this.checked;
-      save();
-    });
+    var reminderToggle = document.getElementById('m-reminder-enabled');
+    if (reminderToggle) {
+      reminderToggle.addEventListener('change', function () {
+        list.reminder.enabled = this.checked;
+        save();
+      });
+    }
 
-    document.getElementById('m-cancel').addEventListener('click', closeModal);
+    on('m-cancel', closeModal);
+    on('m-change-icon', function () { openListIconPicker(list); });
 
-    document.getElementById('m-change-icon').addEventListener('click', function () {
-      openListIconPicker(list);
-    });
-
-    document.getElementById('m-change-type').addEventListener('click', function () {
+    on('m-change-type', function () {
       list.type = list.type === 'rotina' ? 'lista' : 'rotina';
       save();
       openListMenu(list);
       renderDetail();
     });
 
-    document.getElementById('m-sort-order').addEventListener('click', function () {
+    on('m-sort-order', function () {
       list.sortOrder = SORT_NEXT[list.sortOrder];
       save();
       openListMenu(list);
       renderDetail();
     });
 
-    document.getElementById('m-rename').addEventListener('click', function () {
+    on('m-rename', function () {
       var novo = prompt('Novo nome da lista:', list.name);
       if (novo && novo.trim()) {
         list.name = novo.trim();
@@ -975,25 +1075,34 @@
       }
     });
 
-    document.getElementById('m-share').addEventListener('click', function () {
-      shareList(list);
+    on('m-members', function () { openMembersModal(list); });
+    on('m-members-local', function () {
+      if (!session) {
+        alert('Pra compartilhar com outras pessoas, entre numa conta primeiro.');
+        openAuthModal();
+        return;
+      }
+      enrollList(list);
+      openMembersModal(list);
     });
 
-    document.getElementById('m-check-all').addEventListener('click', function () {
+    on('m-share', function () { shareList(list); });
+
+    on('m-check-all', function () {
       list.items.forEach(function (i) { i.done = true; });
       save();
       closeModal();
       renderDetail();
     });
 
-    document.getElementById('m-uncheck-all').addEventListener('click', function () {
+    on('m-uncheck-all', function () {
       list.items.forEach(function (i) { i.done = false; });
       save();
       closeModal();
       renderDetail();
     });
 
-    document.getElementById('m-clear').addEventListener('click', function () {
+    on('m-clear', function () {
       list.items.filter(function (i) { return i.done; }).forEach(function (i) {
         moveItemToTrash(list, i);
       });
@@ -1001,12 +1110,10 @@
       renderDetail();
     });
 
-    document.getElementById('m-delete').addEventListener('click', function () {
-      if (confirm('Excluir a lista "' + list.name + '"? Fica na lixeira por 7 dias, dá pra restaurar.')) {
-        moveListToTrash(list);
-        closeModal();
-        showHome();
-      }
+    on('m-delete', function () {
+      if (!list.role && !confirm('Excluir a lista "' + list.name + '"? Fica na lixeira por 7 dias, dá pra restaurar.')) return;
+      closeModal();
+      removeListWithConfirm(list, showHome);
     });
   }
 
@@ -1135,7 +1242,7 @@
       '<div class="settings-row"><span>Notificações</span><button id="m-push-toggle" class="btn btn-secondary" style="flex:none;">…</button></div>' +
       '<p id="m-push-status" class="hint" style="margin:0;"></p>' +
       '<div id="m-cloud-box" style="display:flex;flex-direction:column;gap:8px;"></div>' +
-      '<p class="hint" style="margin:0;">O backup na nuvem é gratuito e automático depois de criado, mas não é criptografado com senha — não guarde nada sensível nas listas.</p>' +
+      '<p class="hint" style="margin:0;">As listas da conta ficam no servidor (não são criptografadas de ponta a ponta) — não guarde nada muito sensível nelas.</p>' +
       '<div class="settings-row"><span>Exportar backup (.json)</span><button id="m-export" class="btn btn-secondary" style="flex:none;">Exportar</button></div>' +
       '<div class="settings-row"><span>Importar backup (.json)</span><button id="m-import" class="btn btn-secondary" style="flex:none;">Importar</button></div>' +
       '<input id="m-import-file" type="file" accept="application/json" class="hidden" style="display:none;">' +
@@ -1200,6 +1307,10 @@
           if (confirm('Isso substitui todos os dados atuais pelos do arquivo. Continuar?')) {
             state = parsed;
             if (!state.lastResetDate) state.lastResetDate = todayStr();
+            state.lists.forEach(function (l) {
+              delete l.role; delete l.rev; delete l.base; delete l.members; delete l.ownerName;
+              if (session) enrollList(l);
+            });
             ensureReminderDefaults();
             ensureWordStatsDefaults();
             ensureTrashDefaults();
@@ -1236,7 +1347,284 @@
     setTimeout(function () { URL.revokeObjectURL(url); }, 5000);
   }
 
-  // ---------- backup na nuvem (não perder os dados) ----------
+  // ---------- contas e sync por lista ----------
+
+  function saveSession(s) {
+    session = s;
+    try {
+      if (s) localStorage.setItem(SESSION_KEY, JSON.stringify(s));
+      else localStorage.removeItem(SESSION_KEY);
+    } catch (e) {}
+  }
+
+  function apiFetch(method, path, body) {
+    var headers = { 'Content-Type': 'application/json' };
+    if (session) headers.Authorization = 'Bearer ' + session.token;
+    return fetch(PUSH_SERVER_URL + path, {
+      method: method,
+      headers: headers,
+      body: body === undefined ? undefined : JSON.stringify(body)
+    }).then(function (resp) {
+      return resp.json().catch(function () { return null; }).then(function (data) {
+        if (resp.status === 401 && session && path.indexOf('/auth/') !== 0) sessionExpired();
+        return { ok: resp.ok, status: resp.status, data: data };
+      });
+    });
+  }
+
+  function errorText(res, fallback) {
+    return (res && res.data && res.data.error) || fallback;
+  }
+
+  function clone(v) { return JSON.parse(JSON.stringify(v)); }
+
+  // JSON com chaves ordenadas: compara dados sem depender da ordem das chaves.
+  function canon(v) {
+    if (v === null || typeof v !== 'object') return JSON.stringify(v);
+    if (Array.isArray(v)) return '[' + v.map(canon).join(',') + ']';
+    return '{' + Object.keys(v).sort().filter(function (k) { return v[k] !== undefined; }).map(function (k) {
+      return JSON.stringify(k) + ':' + canon(v[k]);
+    }).join(',') + '}';
+  }
+
+  // O que vai pro servidor de cada lista (o resto, como role/rev, é só local).
+  function listData(list) {
+    return {
+      name: list.name, emoji: list.emoji, type: list.type, reminder: list.reminder,
+      sortOrder: list.sortOrder, items: list.items, lastResetDate: list.lastResetDate
+    };
+  }
+
+  function isDirty(list) {
+    return !list.base || canon(listData(list)) !== canon(list.base);
+  }
+
+  function isEditingText() {
+    var el = document.activeElement;
+    return !!(el && el.tagName === 'TEXTAREA' && !el.readOnly);
+  }
+
+  function rerender() {
+    if (currentListId && getList(currentListId)) renderDetail(); else { currentListId = null; renderHome(); }
+  }
+
+  // Marca a lista pra subir pra conta como sua (dono).
+  function enrollList(list) {
+    if (!session || list.role) return;
+    list.role = 'owner';
+    list.rev = 0;
+    list.base = null;
+    list.ownerName = session.username;
+    save();
+  }
+
+  function applyServerList(list, rec) {
+    var d = rec.data;
+    list.name = d.name;
+    list.emoji = d.emoji;
+    list.type = d.type;
+    list.reminder = d.reminder || list.reminder || { enabled: false, times: ['08:00'] };
+    list.sortOrder = d.sortOrder || 'manual';
+    list.items = d.items;
+    if (d.lastResetDate) list.lastResetDate = d.lastResetDate;
+    list.rev = rec.rev;
+    list.role = rec.role;
+    list.ownerName = rec.ownerName || list.ownerName;
+    if (rec.members) list.members = rec.members;
+    list.base = clone(d);
+  }
+
+  function byId(items) {
+    var map = {};
+    items.forEach(function (i) { map[i.id] = i; });
+    return map;
+  }
+
+  // Merge de 3 vias por id de item: base = última versão do servidor que este
+  // aparelho viu, local = o que está aqui, server = o que está lá agora.
+  function mergeItems(base, local, server) {
+    var b = byId(base), l = byId(local), s = byId(server), out = [];
+    server.forEach(function (sItem) {
+      var lItem = l[sItem.id], bItem = b[sItem.id];
+      if (lItem) out.push(bItem && canon(lItem) === canon(bItem) ? sItem : lItem);
+      else if (!bItem) out.push(sItem); // adicionado por outra pessoa
+      // senão: removido aqui, continua removido
+    });
+    local.forEach(function (lItem) {
+      if (!s[lItem.id] && !b[lItem.id]) out.push(lItem); // adicionado aqui
+    });
+    return out;
+  }
+
+  // Aplica a versão do servidor por cima, preservando o que mudou localmente.
+  function mergeConflict(list, rec) {
+    var base = list.base || {};
+    var local = listData(list);
+    var d = rec.data;
+    var merged = {};
+    ['name', 'emoji', 'type', 'sortOrder', 'reminder', 'lastResetDate'].forEach(function (f) {
+      var changedHere = list.base && canon(local[f]) !== canon(base[f]);
+      merged[f] = changedHere ? local[f] : d[f];
+    });
+    merged.items = mergeItems(base.items || [], local.items, d.items);
+    applyServerList(list, { data: merged, rev: rec.rev, role: rec.role, ownerName: rec.ownerName, members: rec.members });
+    list.base = clone(d); // o que o servidor tem; a diferença vira o próximo envio
+  }
+
+  function pushList(list) {
+    var sent = clone(listData(list));
+    return apiFetch('PUT', '/lists/' + list.id, { data: sent, baseRev: list.rev || 0 }).then(function (res) {
+      if (res.ok) {
+        list.rev = res.data.rev;
+        list.role = res.data.role || list.role;
+        if (list.role === 'editor' && res.data.data) {
+          // o servidor mantém o nome/ícone/etc. do dono
+          var d = res.data.data;
+          list.name = d.name; list.emoji = d.emoji; list.type = d.type;
+          list.reminder = d.reminder || list.reminder; list.sortOrder = d.sortOrder || list.sortOrder;
+          list.base = clone(d);
+        } else {
+          list.base = sent;
+        }
+        return 'ok';
+      }
+      if (res.status === 409 && res.data && res.data.data) {
+        if (isEditingText()) return 'fail';
+        mergeConflict(list, res.data);
+        return 'retry';
+      }
+      if (res.status === 404) {
+        if (!list.rev) { // id já usado por outra lista: gera outro
+          var oldId = list.id;
+          list.id = uid();
+          if (currentListId === oldId) currentListId = list.id;
+          return 'retry';
+        }
+        state.lists = state.lists.filter(function (l) { return l.id !== list.id; }); // perdeu o acesso
+        return 'gone';
+      }
+      if (res.status === 403) {
+        return 'fail';
+      }
+      return 'fail';
+    });
+  }
+
+  function pushWithRetry(list, attempt) {
+    return pushList(list).then(function (r) {
+      if (r === 'retry' && attempt < 3) return pushWithRetry(list, attempt + 1);
+      return r;
+    });
+  }
+
+  function pushDirtyLists() {
+    var changedUI = false;
+    var chain = Promise.resolve();
+    state.lists.filter(function (l) {
+      return l.role && l.role !== 'viewer' && isDirty(l);
+    }).forEach(function (l) {
+      chain = chain.then(function () { return pushWithRetry(l, 0); }).then(function (r) {
+        if (r === 'gone' || r === 'retry') changedUI = true;
+      });
+    });
+    return chain.then(function () { return changedUI; });
+  }
+
+  function membersChanged(a, b) { return canon(a || []) !== canon(b || []); }
+
+  function mergeServerLists(serverLists) {
+    var changed = false, present = {};
+    serverLists.forEach(function (rec) {
+      present[rec.id] = true;
+      var local = getList(rec.id);
+      if (!local) {
+        var fresh = { id: rec.id };
+        applyServerList(fresh, rec);
+        state.lists.push(fresh);
+        changed = true;
+        return;
+      }
+      if (!local.role) return; // cópia local que não é da conta
+      if (local.role !== rec.role || local.ownerName !== rec.ownerName || membersChanged(local.members, rec.members)) {
+        local.role = rec.role;
+        local.ownerName = rec.ownerName;
+        local.members = rec.members;
+        changed = true;
+      }
+      if (rec.rev > (local.rev || 0)) {
+        if (local.role !== 'viewer' && isDirty(local) && local.base) mergeConflict(local, rec);
+        else applyServerList(local, rec);
+        changed = true;
+      }
+    });
+    var before = state.lists.length;
+    state.lists = state.lists.filter(function (l) { return !(l.role && l.rev > 0 && !present[l.id]); });
+    if (state.lists.length !== before) changed = true;
+    return changed;
+  }
+
+  function pullLists() {
+    return apiFetch('GET', '/lists').then(function (res) {
+      if (!res.ok || !res.data || !res.data.lists) return false;
+      if (isEditingText()) return false; // tenta de novo no próximo ciclo
+      return mergeServerLists(res.data.lists);
+    });
+  }
+
+  function doSync() {
+    return pushDirtyLists().then(function (changedByPush) {
+      return pullLists().then(function (changedByPull) {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+        if (changedByPush || changedByPull) {
+          applyDailyReset();
+          scheduleReminderSync();
+          rerender();
+        }
+      });
+    });
+  }
+
+  var syncPromise = null;
+  var syncAgain = false;
+
+  // Sobe o que mudou aqui e baixa o que mudou lá. Um ciclo por vez.
+  function syncTick() {
+    if (!session) return Promise.resolve();
+    if (syncPromise) { syncAgain = true; return syncPromise; }
+    syncPromise = doSync().catch(function () {}).then(function () {
+      syncPromise = null;
+      if (syncAgain) { syncAgain = false; return syncTick(); }
+    });
+    return syncPromise;
+  }
+
+  var accountSyncTimer = null;
+
+  function scheduleAccountSync() {
+    if (!session) return;
+    clearTimeout(accountSyncTimer);
+    accountSyncTimer = setTimeout(syncTick, 800);
+  }
+
+  // Ao sair (ou se a sessão vencer): listas de outras pessoas saem do aparelho;
+  // as suas ficam aqui como cópia local.
+  function detachAccount() {
+    state.lists = state.lists.filter(function (l) { return !l.role || l.role === 'owner'; });
+    state.lists.forEach(function (l) {
+      delete l.role; delete l.rev; delete l.base; delete l.members; delete l.ownerName;
+    });
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  }
+
+  function sessionExpired() {
+    if (!session) return;
+    detachAccount();
+    saveSession(null);
+    rerender();
+    openAuthModal('Sua sessão expirou. Entre de novo.');
+  }
+
+  // ---------- legado: código de sincronização (só quem já usava, sem conta) ----------
 
   var cloudBackupTimer = null;
 
@@ -1244,21 +1632,8 @@
     return localStorage.getItem(SYNC_CODE_KEY);
   }
 
-  function setSyncCode(code) {
-    localStorage.setItem(SYNC_CODE_KEY, code);
-  }
-
-  function generateSyncCode() {
-    var chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // sem letras/números parecidos (0/O, 1/I/L)
-    var bytes = new Uint8Array(10);
-    crypto.getRandomValues(bytes);
-    var code = '';
-    for (var i = 0; i < bytes.length; i++) code += chars[bytes[i] % chars.length];
-    return code;
-  }
-
   function scheduleCloudBackup() {
-    if (!getSyncCode()) return; // só faz backup automático depois que o usuário criar um código
+    if (session || !getSyncCode()) return;
     clearTimeout(cloudBackupTimer);
     cloudBackupTimer = setTimeout(uploadCloudBackup, 2000);
   }
@@ -1273,7 +1648,7 @@
 
   function uploadCloudBackup() {
     var code = getSyncCode();
-    if (!code) return Promise.resolve();
+    if (!code || session) return Promise.resolve();
     return fetch(PUSH_SERVER_URL + '/data/save', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1286,24 +1661,9 @@
     }).catch(function () {});
   }
 
-  function downloadCloudBackup(code) {
-    return fetch(PUSH_SERVER_URL + '/data/load', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ code: code })
-    }).then(function (resp) {
-      if (!resp.ok) throw new Error(resp.status === 404 ? 'codigo nao encontrado' : 'erro no servidor');
-      return resp.json();
-    });
-  }
-
-  // Puxa a nuvem sem esperar o usuário mandar: se outro aparelho salvou algo
-  // mais novo, atualiza os dados locais sozinho (checagem por horário, sem
-  // tempo real de verdade, mas automático o bastante pra não precisar
-  // restaurar manualmente).
   function checkCloudForUpdates() {
     var code = getSyncCode();
-    if (!code) return Promise.resolve();
+    if (!code || session) return Promise.resolve();
     return fetch(PUSH_SERVER_URL + '/data/load', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1313,7 +1673,7 @@
       return resp.json();
     }).then(function (record) {
       if (!record || !record.updatedAt) return;
-      if (record.updatedAt <= getLastSyncedAt()) return; // nada mais novo que o nosso
+      if (record.updatedAt <= getLastSyncedAt()) return;
 
       state = record.data;
       ensureReminderDefaults();
@@ -1324,16 +1684,19 @@
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); // não usa save() pra não reenviar pra nuvem
       setLastSyncedAt(record.updatedAt);
 
-      if (currentListId) renderDetail(); else renderHome();
+      rerender();
     }).catch(function () {});
   }
 
   var cloudPollTimer = null;
 
+  function cloudTick() {
+    return session ? syncTick() : checkCloudForUpdates();
+  }
+
   function startCloudPolling() {
     stopCloudPolling();
-    if (!getSyncCode()) return;
-    cloudPollTimer = setInterval(checkCloudForUpdates, CLOUD_POLL_INTERVAL_MS);
+    cloudPollTimer = setInterval(cloudTick, CLOUD_POLL_INTERVAL_MS);
   }
 
   function stopCloudPolling() {
@@ -1341,53 +1704,287 @@
     cloudPollTimer = null;
   }
 
+  // ---------- login / cadastro ----------
+
+  function openAuthModal(message) {
+    openModal(
+      '<h2>Conta</h2>' +
+      (message ? '<p class="hint" style="margin:0;color:var(--text);">' + escapeHtml(message) + '</p>' : '') +
+      '<p class="hint" style="margin:0;">Com uma conta você usa suas listas em vários aparelhos e compartilha com outras pessoas. ' +
+        'Não existe recuperação de senha: anote a sua.</p>' +
+      '<label>Usuário<input id="m-user" type="text" autocapitalize="none" autocorrect="off" spellcheck="false" maxlength="24" placeholder="3 a 24 letras, números, _ . -"></label>' +
+      '<label>Senha<input id="m-pass" type="password" autocomplete="current-password" placeholder="mínimo 6 caracteres"></label>' +
+      '<p id="m-auth-error" class="error-msg"></p>' +
+      '<button id="m-login" class="btn btn-primary">Entrar</button>' +
+      '<button id="m-register" class="btn btn-secondary">Criar conta</button>' +
+      '<button id="m-skip" class="btn btn-secondary">Agora não (usar só neste aparelho)</button>'
+    );
+
+    var errorEl = document.getElementById('m-auth-error');
+    var buttons = [document.getElementById('m-login'), document.getElementById('m-register')];
+
+    function submit(kind) {
+      var username = document.getElementById('m-user').value.trim();
+      var password = document.getElementById('m-pass').value;
+      if (!username || !password) { errorEl.textContent = 'Preencha usuário e senha.'; return; }
+      errorEl.textContent = '';
+      buttons.forEach(function (b) { b.disabled = true; });
+      apiFetch('POST', '/auth/' + kind, { username: username, password: password }).then(function (res) {
+        if (!res.ok) {
+          errorEl.textContent = errorText(res, 'Não deu certo. Tente de novo.');
+          buttons.forEach(function (b) { b.disabled = false; });
+          return;
+        }
+        afterLogin(res.data);
+      }).catch(function () {
+        errorEl.textContent = 'Sem conexão com o servidor.';
+        buttons.forEach(function (b) { b.disabled = false; });
+      });
+    }
+
+    document.getElementById('m-login').addEventListener('click', function () { submit('login'); });
+    document.getElementById('m-register').addEventListener('click', function () { submit('register'); });
+    document.getElementById('m-pass').addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') { e.preventDefault(); submit('login'); }
+    });
+    document.getElementById('m-skip').addEventListener('click', function () {
+      try { localStorage.setItem(SKIP_LOGIN_KEY, '1'); } catch (e) {}
+      closeModal();
+    });
+    document.getElementById('m-user').focus();
+  }
+
+  function afterLogin(data) {
+    var user = data.user || {};
+    saveSession({ token: data.token, username: user.username, userId: user.id });
+    try { localStorage.removeItem(SKIP_LOGIN_KEY); } catch (e) {}
+    closeModal();
+
+    var local = state.lists.filter(function (l) { return !l.role; });
+    if (local.length && confirm(
+      'Enviar as ' + local.length + ' lista(s) deste aparelho pra conta "' + session.username + '"?\n\n' +
+      'Se você já usa a conta em outro aparelho e este só tem as listas de exemplo, toque em Cancelar.'
+    )) {
+      local.forEach(enrollList);
+    }
+
+    syncTick().then(function () {
+      consumePendingInvite();
+      rerender();
+    });
+  }
+
+  function acceptInvite(code) {
+    return apiFetch('POST', '/invites/accept', { code: code }).then(function (res) {
+      if (!res.ok) { alert(errorText(res, 'Convite inválido ou expirado.')); return; }
+      return syncTick().then(function () {
+        alert('Você entrou na lista como ' + ROLE_LABELS[res.data.role] + '.');
+        showHome();
+      });
+    }).catch(function () { alert('Sem conexão com o servidor.'); });
+  }
+
+  function consumePendingInvite() {
+    var code = null;
+    try { code = localStorage.getItem(PENDING_INVITE_KEY); } catch (e) {}
+    if (!code || !session) return;
+    try { localStorage.removeItem(PENDING_INVITE_KEY); } catch (e) {}
+    acceptInvite(code);
+  }
+
+  function promptInviteCode() {
+    if (!session) {
+      alert('Entre numa conta pra usar um convite.');
+      openAuthModal();
+      return;
+    }
+    var code = prompt('Digite o código do convite (ou cole o link):');
+    if (!code) return;
+    var m = /convite=([A-Za-z0-9]+)/.exec(code);
+    acceptInvite((m ? m[1] : code).trim().toUpperCase());
+  }
+
+  function bootAccountFlow() {
+    try {
+      var code = new URLSearchParams(location.search).get('convite');
+      if (code) {
+        localStorage.setItem(PENDING_INVITE_KEY, code.trim().toUpperCase());
+        history.replaceState(null, '', location.pathname);
+      }
+    } catch (e) {}
+    var pending = null;
+    try { pending = localStorage.getItem(PENDING_INVITE_KEY); } catch (e) {}
+    if (session) { consumePendingInvite(); return; }
+    if (pending) { openAuthModal('Entre ou crie uma conta pra aceitar o convite.'); return; }
+    var skipped = null;
+    try { skipped = localStorage.getItem(SKIP_LOGIN_KEY); } catch (e) {}
+    if (!skipped) openAuthModal();
+  }
+
+  var joinBtn = document.getElementById('btn-join');
+  if (joinBtn) joinBtn.addEventListener('click', promptInviteCode);
+
   function refreshCloudUI() {
     var box = document.getElementById('m-cloud-box');
     if (!box) return;
-    var code = getSyncCode();
-    if (code) {
+
+    if (session) {
+      var unsent = state.lists.filter(function (l) { return !l.role; }).length;
       box.innerHTML =
-        '<p class="hint" style="margin:0;">Seu código de sincronização (anote e use nos outros aparelhos):</p>' +
-        '<input id="m-cloud-code" type="text" value="' + code + '" readonly ' +
-          'style="font-size:20px;letter-spacing:2px;text-align:center;font-weight:700;">' +
-        '<p class="hint" style="margin:0;">Sincroniza sozinho a cada ~5s enquanto o app estiver aberto nos aparelhos.</p>' +
-        '<button id="m-cloud-backup-now" class="btn btn-secondary">Fazer backup agora</button>';
-      document.getElementById('m-cloud-backup-now').addEventListener('click', function () {
-        uploadCloudBackup().then(function () { alert('Backup enviado.'); });
-      });
-    } else {
-      box.innerHTML =
-        '<button id="m-cloud-create" class="btn btn-secondary">Criar backup na nuvem</button>' +
-        '<button id="m-cloud-restore" class="btn btn-secondary">Restaurar de um código</button>';
-      document.getElementById('m-cloud-create').addEventListener('click', function () {
-        setSyncCode(generateSyncCode());
-        uploadCloudBackup();
-        startCloudPolling();
-        refreshCloudUI();
-      });
-      document.getElementById('m-cloud-restore').addEventListener('click', function () {
-        var code = prompt('Digite o código de sincronização do outro aparelho:');
-        if (!code) return;
-        code = code.trim().toUpperCase();
-        downloadCloudBackup(code).then(function (record) {
-          if (!confirm('Isso substitui todos os dados atuais pelos da nuvem. Continuar?')) return;
-          state = record.data;
-          ensureReminderDefaults();
-          ensureWordStatsDefaults();
-          ensureTrashDefaults();
-          if (!state.lastResetDate) state.lastResetDate = todayStr();
-          applyDailyReset();
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-          setSyncCode(code);
-          setLastSyncedAt(record.updatedAt || Date.now());
-          startCloudPolling();
+        '<div class="settings-row"><span>Conta: <strong>' + escapeHtml(session.username) + '</strong></span>' +
+          '<button id="m-logout" class="btn btn-secondary" style="flex:none;">Sair</button></div>' +
+        '<p class="hint" style="margin:0;">Suas listas sincronizam sozinhas entre os aparelhos em que você entrou (a cada ~5s com o app aberto).</p>' +
+        (unsent ? '<button id="m-send-local" class="btn btn-secondary">Enviar as ' + unsent + ' lista(s) só deste aparelho pra conta</button>' : '') +
+        '<button id="m-join" class="btn btn-secondary">Entrar numa lista com convite</button>';
+      document.getElementById('m-logout').addEventListener('click', function () {
+        if (!confirm('Sair da conta? As listas de outras pessoas saem deste aparelho; as suas ficam aqui como cópia.')) return;
+        syncTick().then(function () {
+          return apiFetch('POST', '/auth/logout').catch(function () {});
+        }).then(function () {
+          detachAccount();
+          saveSession(null);
           closeModal();
           showHome();
-        }).catch(function (err) {
-          alert('Não foi possível restaurar: ' + err.message);
         });
       });
+      var sendBtn = document.getElementById('m-send-local');
+      if (sendBtn) {
+        sendBtn.addEventListener('click', function () {
+          state.lists.filter(function (l) { return !l.role; }).forEach(enrollList);
+          syncTick();
+          refreshCloudUI();
+        });
+      }
+      document.getElementById('m-join').addEventListener('click', function () { closeModal(); promptInviteCode(); });
+      return;
     }
+
+    var code = getSyncCode();
+    box.innerHTML =
+      '<button id="m-login-open" class="btn btn-secondary">Entrar / criar conta</button>' +
+      '<button id="m-join" class="btn btn-secondary">Entrar numa lista com convite</button>' +
+      (code
+        ? '<p class="hint" style="margin:0;">Sincronização antiga (sem conta) — código:</p>' +
+          '<input id="m-cloud-code" type="text" class="code-box" value="' + code + '" readonly>' +
+          '<button id="m-cloud-backup-now" class="btn btn-secondary">Fazer backup agora</button>'
+        : '');
+    document.getElementById('m-login-open').addEventListener('click', function () { openAuthModal(); });
+    document.getElementById('m-join').addEventListener('click', function () { closeModal(); promptInviteCode(); });
+    var backupBtn = document.getElementById('m-cloud-backup-now');
+    if (backupBtn) {
+      backupBtn.addEventListener('click', function () {
+        uploadCloudBackup().then(function () { alert('Backup enviado.'); });
+      });
+    }
+  }
+
+  // ---------- compartilhar lista com pessoas ----------
+
+  function inviteLink(code) {
+    return location.origin + location.pathname + '?convite=' + code;
+  }
+
+  function shareInvite(code, role, listName) {
+    var text = 'Convite pra lista "' + listName + '" (' + ROLE_LABELS[role] + ') no Checklist Diário:\n' + inviteLink(code) + '\nCódigo: ' + code;
+    if (navigator.share) {
+      navigator.share({ text: text }).catch(function () {});
+    } else if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function () { alert('Convite copiado.'); }).catch(function () { prompt('Copie o convite:', text); });
+    } else {
+      prompt('Copie o convite:', text);
+    }
+  }
+
+  function openMembersModal(list) {
+    var owner = list.role === 'owner';
+    if (owner && !list.rev) {
+      openModal('<h2>👥 ' + escapeHtml(list.name) + '</h2><p class="hint" style="margin:0;">Enviando a lista pra conta…</p>');
+      syncTick().then(function () {
+        if (list.rev) openMembersModal(list);
+        else { closeModal(); alert('Não foi possível enviar a lista agora. Verifique a conexão.'); }
+      });
+      return;
+    }
+
+    var members = list.members || [];
+    var html = '<h2>👥 ' + escapeHtml(list.name) + '</h2>' +
+      '<p class="hint" style="margin:0;">Dono: <strong>' + escapeHtml(list.ownerName || '?') + '</strong></p>';
+    if (!members.length) html += '<p class="hint" style="margin:0;">Ninguém além do dono.</p>';
+    members.forEach(function (m) {
+      html += owner
+        ? '<div class="settings-row"><span>' + escapeHtml(m.username) + '</span><span style="display:flex;gap:6px;">' +
+            '<select class="m-role" data-user="' + m.userId + '">' +
+              '<option value="editor"' + (m.role === 'editor' ? ' selected' : '') + '>Editor</option>' +
+              '<option value="viewer"' + (m.role === 'viewer' ? ' selected' : '') + '>Leitor</option></select>' +
+            '<button class="btn btn-danger small-btn m-kick" data-user="' + m.userId + '">Remover</button></span></div>'
+        : '<div class="settings-row"><span>' + escapeHtml(m.username) + '</span><span class="hint" style="margin:0;">' + ROLE_LABELS[m.role] + '</span></div>';
+    });
+    if (owner) {
+      html +=
+        '<h2 style="font-size:16px;margin:8px 0 0;">Convidar</h2>' +
+        '<p class="hint" style="margin:0;">Gere um convite e mande pra pessoa. Vale 7 dias e até 10 usos.</p>' +
+        '<div class="settings-row"><select id="m-invite-role"><option value="editor">Editor (mexe nos itens)</option><option value="viewer">Leitor (só vê)</option></select>' +
+          '<button id="m-invite-create" class="btn btn-primary small-btn">Gerar convite</button></div>' +
+        '<div id="m-invites" style="display:flex;flex-direction:column;gap:8px;"></div>';
+    }
+    html += '<button id="m-cancel" class="btn btn-secondary">Fechar</button>';
+    openModal(html);
+    on('m-cancel', closeModal);
+    if (!owner) return;
+
+    function refreshInvites() {
+      apiFetch('GET', '/lists/' + list.id + '/invites').then(function (res) {
+        var box = document.getElementById('m-invites');
+        if (!box || !res.ok) return;
+        box.innerHTML = res.data.invites.map(function (inv) {
+          var days = Math.max(1, Math.ceil((inv.expiresAt - Date.now()) / 86400000));
+          return '<div class="settings-row"><span><strong>' + inv.code + '</strong> · ' + ROLE_LABELS[inv.role] +
+            '<br><span class="hint" style="margin:0;">expira em ' + days + ' dia(s) · ' + inv.usesLeft + ' uso(s)</span></span>' +
+            '<span style="display:flex;gap:6px;">' +
+              '<button class="btn btn-secondary small-btn m-inv-share" data-code="' + inv.code + '" data-role="' + inv.role + '">Enviar</button>' +
+              '<button class="btn btn-danger small-btn m-inv-revoke" data-code="' + inv.code + '">Revogar</button></span></div>';
+        }).join('');
+        box.querySelectorAll('.m-inv-share').forEach(function (b) {
+          b.addEventListener('click', function () { shareInvite(b.dataset.code, b.dataset.role, list.name); });
+        });
+        box.querySelectorAll('.m-inv-revoke').forEach(function (b) {
+          b.addEventListener('click', function () {
+            apiFetch('DELETE', '/lists/' + list.id + '/invites/' + b.dataset.code).then(refreshInvites);
+          });
+        });
+      }).catch(function () {});
+    }
+    refreshInvites();
+
+    on('m-invite-create', function () {
+      var role = document.getElementById('m-invite-role').value;
+      apiFetch('POST', '/lists/' + list.id + '/invites', { role: role }).then(function (res) {
+        if (!res.ok) { alert(errorText(res, 'Não foi possível gerar o convite.')); return; }
+        refreshInvites();
+        shareInvite(res.data.code, role, list.name);
+      }).catch(function () { alert('Sem conexão com o servidor.'); });
+    });
+
+    modal.querySelectorAll('.m-role').forEach(function (sel) {
+      sel.addEventListener('change', function () {
+        apiFetch('PATCH', '/lists/' + list.id + '/members/' + sel.dataset.user, { role: sel.value }).then(function (res) {
+          if (!res.ok) { alert(errorText(res, 'Não foi possível mudar o papel.')); return; }
+          list.members.forEach(function (m) { if (m.userId === sel.dataset.user) m.role = sel.value; });
+          save();
+        }).catch(function () { alert('Sem conexão com o servidor.'); });
+      });
+    });
+    modal.querySelectorAll('.m-kick').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        if (!confirm('Remover essa pessoa da lista?')) return;
+        apiFetch('DELETE', '/lists/' + list.id + '/members/' + btn.dataset.user).then(function (res) {
+          if (!res.ok) { alert(errorText(res, 'Não foi possível remover.')); return; }
+          list.members = list.members.filter(function (m) { return m.userId !== btn.dataset.user; });
+          save();
+          openMembersModal(list);
+        }).catch(function () { alert('Sem conexão com o servidor.'); });
+      });
+    });
   }
 
   // ---------- notificações push (lembretes de verdade) ----------
@@ -1609,7 +2206,7 @@
       applyDailyReset();
       purgeOldTrash();
       if (currentListId) renderDetail(); else renderHome();
-      checkCloudForUpdates();
+      cloudTick();
       startCloudPolling();
     } else {
       if (isAppLockEnabled()) showLockScreen();
@@ -1649,7 +2246,8 @@
 
   load();
   showHome();
-  checkCloudForUpdates();
+  cloudTick();
   startCloudPolling();
+  bootAccountFlow();
   if (isAppLockEnabled()) { showLockScreen(); tryUnlock(); }
 })();

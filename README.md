@@ -54,11 +54,11 @@ Os ícones ficam em `icons/`. Se quiser mudar a cor ou o desenho, edite `gen-ico
 node gen-icons.js
 ```
 
-## Backup na nuvem (não perder os dados)
+## Contas e compartilhamento
 
-Em Ajustes → "Criar backup na nuvem" gera um código de sincronização e passa a fazer backup automático (Cloudflare KV, mesmo Worker dos lembretes) toda vez que você mexe numa lista. Em outro aparelho, use "Restaurar de um código" com esse mesmo código pra recuperar tudo.
+Ao abrir o app dá pra criar uma conta (usuário + senha) ou continuar sem conta. Com conta, as listas sincronizam entre aparelhos (Cloudflare D1, mesmo Worker dos lembretes) a cada ~5s e podem ser compartilhadas: no menu da lista, "Compartilhar com pessoas" gera um convite (link ou código, vale 7 dias) com papel **editor** (mexe nos itens) ou **leitor** (só vê). O dono também renomeia, exclui e gerencia membros. As permissões são aplicadas pelo servidor. Conflitos são resolvidos por item.
 
-Limitação: não tem senha/criptografia nesse backup, só o código como trava (evite guardar algo sensível nas listas). Também não é sincronização em tempo real entre aparelhos — é "o último que salvou, vale" com checagem a cada ~5s enquanto o app está aberto: se editar em dois aparelhos ao mesmo tempo sem sincronizar entre as edições, o último backup sobrescreve o outro.
+Não há recuperação de senha (não existe e-mail): anote a sua. No primeiro login o app oferece enviar as listas do aparelho pra conta. Quem já usava o antigo código de sincronização continua podendo usá-lo enquanto não entrar numa conta (esses backups não são migrados automaticamente).
 
 ## Outros recursos
 

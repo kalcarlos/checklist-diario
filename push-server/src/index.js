@@ -5,19 +5,70 @@
 // Tambem guarda um backup dos dados do checklist por "codigo de sincronizacao",
 // pra recuperar em outro aparelho (rotas /data/save e /data/load).
 
+import { fail } from './util.js';
+import { authenticate, handleRegister, handleLogin, handleLogout, handleMe } from './auth.js';
+import {
+  handleListsGet, handleListPut, handleListDelete, handleInviteCreate, handleInvitesList,
+  handleInviteRevoke, handleInviteAccept, handleMemberPatch, handleMemberDelete,
+} from './lists.js';
+
 const ALLOWED_ORIGINS = new Set([
   'https://kalcarlos.github.io',
   'http://localhost:8080',
   'http://localhost:8934',
+  'http://localhost:4205',
+  'http://127.0.0.1:4205',
 ]);
 
 function corsHeaders(origin) {
   const allow = ALLOWED_ORIGINS.has(origin) ? origin : 'https://kalcarlos.github.io';
   return {
     'Access-Control-Allow-Origin': allow,
-    'Access-Control-Allow-Methods': 'POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    'Vary': 'Origin',
   };
+}
+
+// Rotas de conta e listas (D1). Devolve null se a rota nao for dessas.
+async function routeAccounts(request, env, url) {
+  const path = url.pathname;
+  const method = request.method;
+
+  if (method === 'POST' && path === '/auth/register') return handleRegister(request, env);
+  if (method === 'POST' && path === '/auth/login') return handleLogin(request, env);
+
+  const isProtected = path === '/auth/logout' || path === '/auth/me' || path === '/lists' ||
+    path.startsWith('/lists/') || path === '/invites/accept';
+  if (!isProtected) return null;
+
+  const user = await authenticate(request, env);
+  if (!user) return fail(401, 'nao autenticado');
+
+  if (method === 'POST' && path === '/auth/logout') return handleLogout(request, env, user);
+  if (method === 'GET' && path === '/auth/me') return handleMe(request, env, user);
+  if (method === 'GET' && path === '/lists') return handleListsGet(request, env, user);
+  if (method === 'POST' && path === '/invites/accept') return handleInviteAccept(request, env, user);
+
+  const parts = path.split('/').filter(Boolean); // ['lists', id, ...]
+  if (parts[0] === 'lists' && parts[1]) {
+    const listId = decodeURIComponent(parts[1]);
+    if (parts.length === 2) {
+      if (method === 'PUT') return handleListPut(request, env, user, listId);
+      if (method === 'DELETE') return handleListDelete(request, env, user, listId);
+    }
+    if (parts[2] === 'invites') {
+      if (parts.length === 3 && method === 'POST') return handleInviteCreate(request, env, user, listId);
+      if (parts.length === 3 && method === 'GET') return handleInvitesList(request, env, user, listId);
+      if (parts.length === 4 && method === 'DELETE') return handleInviteRevoke(request, env, user, listId, decodeURIComponent(parts[3]));
+    }
+    if (parts[2] === 'members' && parts[3] && parts.length === 4) {
+      const memberId = decodeURIComponent(parts[3]);
+      if (method === 'PATCH') return handleMemberPatch(request, env, user, listId, memberId);
+      if (method === 'DELETE') return handleMemberDelete(request, env, user, listId, memberId);
+    }
+  }
+  return fail(404, 'rota nao encontrada');
 }
 
 function b64urlToBytes(b64url) {
@@ -268,6 +319,12 @@ export default {
 
     const url = new URL(request.url);
     try {
+      const accountResp = await routeAccounts(request, env, url);
+      if (accountResp) {
+        const headers = new Headers(accountResp.headers);
+        Object.entries(cors).forEach(([k, v]) => headers.set(k, v));
+        return new Response(accountResp.body, { status: accountResp.status, headers });
+      }
       if (request.method === 'POST' && url.pathname === '/subscribe') {
         const resp = await handleSubscribe(request, env);
         return new Response(resp.body, { status: resp.status, headers: cors });
