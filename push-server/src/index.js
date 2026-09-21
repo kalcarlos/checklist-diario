@@ -6,7 +6,7 @@
 // pra recuperar em outro aparelho (rotas /data/save e /data/load).
 
 import { fail } from './util.js';
-import { authenticate, handleRegister, handleLogin, handleLogout, handleMe } from './auth.js';
+import { authenticate, handleGoogleLogin, handleRegister, handleLogin, handleLogout, handleMe } from './auth.js';
 import {
   handleListsGet, handleListPut, handleListDelete, handleInviteCreate, handleInvitesList,
   handleInviteRevoke, handleInviteAccept, handleMemberPatch, handleMemberDelete,
@@ -37,6 +37,7 @@ async function routeAccounts(request, env, url) {
 
   if (method === 'POST' && path === '/auth/register') return handleRegister(request, env);
   if (method === 'POST' && path === '/auth/login') return handleLogin(request, env);
+  if (method === 'POST' && path === '/auth/google') return handleGoogleLogin(request, env);
 
   const isProtected = path === '/auth/logout' || path === '/auth/me' || path === '/lists' ||
     path.startsWith('/lists/') || path === '/invites/accept';

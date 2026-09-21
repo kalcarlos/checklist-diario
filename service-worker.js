@@ -1,4 +1,4 @@
-var CACHE_NAME = 'checklist-diario-v14';
+var CACHE_NAME = 'checklist-diario-v15';
 var ASSETS = [
   './',
   './index.html',
@@ -34,6 +34,7 @@ self.addEventListener('activate', function (event) {
 
 self.addEventListener('fetch', function (event) {
   if (event.request.method !== 'GET') return;
+  if (new URL(event.request.url).origin !== self.location.origin) return;
   // Rede primeiro (garante que uma atualização apareça na hora, sem esperar
   // um segundo ciclo de cache), só cai pro que tem salvo se estiver offline.
   event.respondWith(

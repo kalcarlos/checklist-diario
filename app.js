@@ -28,6 +28,8 @@
   ];
 
   // Preencher com a URL do Worker depois de "wrangler deploy" (ex: https://checklist-diario-push.SEU-SUBDOMINIO.workers.dev)
+  // Client ID OAuth do Google (público, pode ficar no código). Vazio = botão do Google escondido.
+  var GOOGLE_CLIENT_ID = '848411907261-lj6tec41plj1cflfgbrtiselhi3vljtu.apps.googleusercontent.com';
   var PUSH_SERVER_URL = 'https://checklist-diario-push.kalcarlos.workers.dev';
   try { PUSH_SERVER_URL = localStorage.getItem(API_URL_KEY) || PUSH_SERVER_URL; } catch (e) {}
   var VAPID_PUBLIC_KEY = 'BGxLxsYdfeBxWWcN37VXpQrfOF5ME3a23FxJSwsayVup0N0ub6OVpDFi8-U6RwvAKLOu1f_BfqsdAaBbIb2Zmsg';
@@ -1715,6 +1717,7 @@
       '<label>Usuário<input id="m-user" type="text" autocapitalize="none" autocorrect="off" spellcheck="false" maxlength="24" placeholder="3 a 24 letras, números, _ . -"></label>' +
       '<label>Senha<input id="m-pass" type="password" autocomplete="current-password" placeholder="mínimo 6 caracteres"></label>' +
       '<p id="m-auth-error" class="error-msg"></p>' +
+      (GOOGLE_CLIENT_ID ? '<div id="m-google" style="display:flex;justify-content:center;min-height:44px;"></div>' : '') +
       '<button id="m-login" class="btn btn-primary">Entrar</button>' +
       '<button id="m-register" class="btn btn-secondary">Criar conta</button>' +
       '<button id="m-skip" class="btn btn-secondary">Agora não (usar só neste aparelho)</button>'
@@ -1752,6 +1755,31 @@
       closeModal();
     });
     document.getElementById('m-user').focus();
+    if (GOOGLE_CLIENT_ID) setupGoogleButton(errorEl);
+  }
+
+  function setupGoogleButton(errorEl) {
+    function render() {
+      var box = document.getElementById('m-google');
+      if (!box || !window.google || !google.accounts) return;
+      google.accounts.id.initialize({
+        client_id: GOOGLE_CLIENT_ID,
+        callback: function (resp) {
+          errorEl.textContent = '';
+          apiFetch('POST', '/auth/google', { credential: resp.credential }).then(function (res) {
+            if (!res.ok) { errorEl.textContent = errorText(res, 'Não deu certo com o Google.'); return; }
+            afterLogin(res.data);
+          }).catch(function () { errorEl.textContent = 'Sem conexão com o servidor.'; });
+        }
+      });
+      google.accounts.id.renderButton(box, { theme: 'outline', size: 'large', text: 'continue_with', locale: 'pt-BR' });
+    }
+    if (window.google && google.accounts) { render(); return; }
+    var s = document.createElement('script');
+    s.src = 'https://accounts.google.com/gsi/client';
+    s.async = true;
+    s.onload = render;
+    document.head.appendChild(s);
   }
 
   function afterLogin(data) {

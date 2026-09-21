@@ -18,3 +18,4 @@ database_id = "d8bcac5c-00e2-4e9b-b131-94026e506b56"
 [vars]
 VAPID_PUBLIC_KEY = "BGxLxsYdfeBxWWcN37VXpQrfOF5ME3a23FxJSwsayVup0N0ub6OVpDFi8-U6RwvAKLOu1f_BfqsdAaBbIb2Zmsg"
 VAPID_SUBJECT = "mailto:carloseduardomilanez@gmail.com"
+GOOGLE_CLIENT_ID = "848411907261-lj6tec41plj1cflfgbrtiselhi3vljtu.apps.googleusercontent.com"

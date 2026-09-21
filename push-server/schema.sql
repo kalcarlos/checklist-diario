@@ -46,3 +46,12 @@ CREATE TABLE IF NOT EXISTS invites (
   uses_left   INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_invites_list ON invites(list_id);
+
+-- Login com Google: liga o "sub" do Google a uma conta. Contas Google nao tem senha (pass_hash vazio).
+CREATE TABLE IF NOT EXISTS oauth_identities (
+  provider    TEXT NOT NULL,
+  subject     TEXT NOT NULL,
+  user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  email       TEXT,
+  PRIMARY KEY (provider, subject)
+);

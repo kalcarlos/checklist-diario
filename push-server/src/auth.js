@@ -123,3 +123,80 @@ export async function handleLogout(request, env, user) {
 export async function handleMe(request, env, user) {
   return json({ user: { id: user.id, username: user.username } });
 }
+
+// ---------- login com Google ----------
+// O app manda o ID token (JWT) do Google; aqui conferimos assinatura, emissor, publico e validade.
+
+const GOOGLE_JWKS_URL = 'https://www.googleapis.com/oauth2/v3/certs';
+
+function decodeJwtPart(part) {
+  return JSON.parse(new TextDecoder().decode(b64urlToBytes(part)));
+}
+
+async function verifyGoogleToken(idToken, env) {
+  const parts = typeof idToken === 'string' ? idToken.split('.') : [];
+  if (parts.length !== 3) return null;
+  let header, payload;
+  try { header = decodeJwtPart(parts[0]); payload = decodeJwtPart(parts[1]); } catch (e) { return null; }
+  if (header.alg !== 'RS256' || !header.kid) return null;
+
+  const jwks = await fetch(GOOGLE_JWKS_URL, { cf: { cacheTtl: 3600, cacheEverything: true } }).then((r) => r.json());
+  const jwk = (jwks.keys || []).find((k) => k.kid === header.kid);
+  if (!jwk) return null;
+  const key = await crypto.subtle.importKey('jwk', jwk, { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['verify']);
+  const ok = await crypto.subtle.verify(
+    'RSASSA-PKCS1-v1_5', key, b64urlToBytes(parts[2]), new TextEncoder().encode(parts[0] + '.' + parts[1])
+  );
+  if (!ok) return null;
+
+  const now = Math.floor(Date.now() / 1000);
+  if (payload.iss !== 'https://accounts.google.com' && payload.iss !== 'accounts.google.com') return null;
+  if (payload.aud !== env.GOOGLE_CLIENT_ID) return null;
+  if (!payload.exp || payload.exp < now) return null;
+  if (!payload.sub) return null;
+  return payload;
+}
+
+function usernameFromGoogle(payload) {
+  const base = String(payload.email || payload.name || 'usuario').split('@')[0]
+    .replace(/[^A-Za-z0-9_.-]/g, '').slice(0, 18) || 'usuario';
+  return base.length < 3 ? base + '_g' : base;
+}
+
+export async function handleGoogleLogin(request, env) {
+  if (!env.GOOGLE_CLIENT_ID) return fail(503, 'login com Google nao configurado');
+  const body = await readJson(request);
+  const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
+  if (!(await underRateLimit(env, 'google-ip:' + ip, 30, 300))) return fail(429, 'muitas tentativas, espere alguns minutos');
+
+  const payload = body ? await verifyGoogleToken(body.credential, env).catch(() => null) : null;
+  if (!payload) return fail(401, 'login com Google invalido');
+
+  const found = await env.DB.prepare(
+    'SELECT u.id AS id, u.username AS username FROM oauth_identities o JOIN users u ON u.id = o.user_id ' +
+    "WHERE o.provider = 'google' AND o.subject = ?"
+  ).bind(payload.sub).first();
+  if (found) {
+    return json({ token: await createSession(env, found.id), user: { id: found.id, username: found.username } });
+  }
+
+  const id = randomId();
+  const base = usernameFromGoogle(payload);
+  let username = base;
+  for (let i = 0; i < 6; i++) {
+    const taken = await env.DB.prepare('SELECT 1 AS x FROM users WHERE username = ?').bind(username).first();
+    if (!taken) break;
+    username = base.slice(0, 18) + '_' + randomToken(3).replace(/[^A-Za-z0-9]/g, '').slice(0, 4);
+  }
+  try {
+    await env.DB.batch([
+      env.DB.prepare("INSERT INTO users (id, username, pass_hash, pass_salt, created_at) VALUES (?, ?, '', '', ?)")
+        .bind(id, username, Date.now()),
+      env.DB.prepare("INSERT INTO oauth_identities (provider, subject, user_id, email) VALUES ('google', ?, ?, ?)")
+        .bind(payload.sub, id, payload.email || null),
+    ]);
+  } catch (e) {
+    return fail(409, 'nao foi possivel criar a conta, tente de novo');
+  }
+  return json({ token: await createSession(env, id), user: { id, username } });
+}
