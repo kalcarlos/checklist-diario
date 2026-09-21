@@ -1,4 +1,4 @@
-var CACHE_NAME = 'checklist-diario-v7';
+var CACHE_NAME = 'checklist-diario-v8';
 var ASSETS = [
   './',
   './index.html',
@@ -34,16 +34,17 @@ self.addEventListener('activate', function (event) {
 
 self.addEventListener('fetch', function (event) {
   if (event.request.method !== 'GET') return;
+  // Rede primeiro (garante que uma atualização apareça na hora, sem esperar
+  // um segundo ciclo de cache), só cai pro que tem salvo se estiver offline.
   event.respondWith(
-    caches.match(event.request).then(function (cached) {
-      var networkFetch = fetch(event.request).then(function (response) {
-        if (response && response.status === 200) {
-          var copy = response.clone();
-          caches.open(CACHE_NAME).then(function (cache) { cache.put(event.request, copy); });
-        }
-        return response;
-      }).catch(function () { return cached; });
-      return cached || networkFetch;
+    fetch(event.request).then(function (response) {
+      if (response && response.status === 200) {
+        var copy = response.clone();
+        caches.open(CACHE_NAME).then(function (cache) { cache.put(event.request, copy); });
+      }
+      return response;
+    }).catch(function () {
+      return caches.match(event.request);
     })
   );
 });

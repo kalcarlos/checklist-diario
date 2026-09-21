@@ -73,6 +73,86 @@
     return s.normalize('NFD').replace(/[̀-ͯ]/g, '');
   }
 
+  function autoGrow(textarea) {
+    textarea.style.height = 'auto';
+    textarea.style.height = textarea.scrollHeight + 'px';
+  }
+
+  // ---------- arrastar pra reordenar (funciona com mouse e toque) ----------
+
+  function setupDragReorder(container, row, handle, arr, item, onDone) {
+    row.__item = item;
+    var dragging = false, startY = 0;
+
+    function clearHighlights() {
+      Array.prototype.forEach.call(container.children, function (r) {
+        r.classList.remove('drag-over-top', 'drag-over-bottom');
+      });
+    }
+
+    function siblingsOf() {
+      return Array.prototype.slice.call(container.children).filter(function (r) { return r !== row; });
+    }
+
+    function onMove(e) {
+      if (!dragging) return;
+      row.style.transform = 'translateY(' + (e.clientY - startY) + 'px)';
+      clearHighlights();
+      siblingsOf().forEach(function (r) {
+        var rect = r.getBoundingClientRect();
+        if (e.clientY >= rect.top && e.clientY <= rect.bottom) {
+          r.classList.add(e.clientY < rect.top + rect.height / 2 ? 'drag-over-top' : 'drag-over-bottom');
+        }
+      });
+    }
+
+    function computeDropIndex(clientY) {
+      var siblings = siblingsOf();
+      for (var i = 0; i < siblings.length; i++) {
+        var rect = siblings[i].getBoundingClientRect();
+        if (clientY < rect.top + rect.height / 2) return arr.indexOf(siblings[i].__item);
+      }
+      return arr.length - 1;
+    }
+
+    function endDrag(e) {
+      if (!dragging) return;
+      dragging = false;
+      row.classList.remove('dragging');
+      row.style.transform = '';
+      row.style.position = '';
+      row.style.zIndex = '';
+      clearHighlights();
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', endDrag);
+      window.removeEventListener('pointercancel', endDrag);
+
+      var dropIndex = computeDropIndex(e.clientY);
+      var currentIndex = arr.indexOf(item);
+      if (dropIndex !== currentIndex && dropIndex >= 0) {
+        arr.splice(currentIndex, 1);
+        if (dropIndex > currentIndex) dropIndex--;
+        arr.splice(dropIndex, 0, item);
+        onDone();
+      }
+    }
+
+    handle.addEventListener('click', function (e) { e.stopPropagation(); });
+
+    handle.addEventListener('pointerdown', function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      dragging = true;
+      startY = e.clientY;
+      row.classList.add('dragging');
+      row.style.position = 'relative';
+      row.style.zIndex = '5';
+      window.addEventListener('pointermove', onMove);
+      window.addEventListener('pointerup', endDrag);
+      window.addEventListener('pointercancel', endDrag);
+    });
+  }
+
   function stem(word) {
     // simplificação bem básica: tira plural terminado em "s" pra casar
     // "plantas" com "planta", "frutas" com "fruta", etc.
@@ -234,7 +314,9 @@
     currentListId = listId;
     screenHome.classList.add('hidden');
     screenDetail.classList.remove('hidden');
-    document.getElementById('add-item-input').value = '';
+    var input = document.getElementById('add-item-input');
+    input.value = '';
+    autoGrow(input);
     hideAddSuggestion();
     renderDetail();
   }
@@ -267,14 +349,35 @@
       card.innerHTML =
         '<div class="emoji">' + list.emoji + '</div>' +
         '<div class="info">' +
-          '<div class="name"></div>' +
+          '<textarea class="name" rows="1"></textarea>' +
           '<div class="meta">' + (total === 0 ? 'Sem itens' : (done + ' de ' + total + ' feitos')) +
             (list.type === 'rotina' ? ' · diária' : '') + '</div>' +
           '<div class="progress-bar"><div style="width:' + pct + '%"></div></div>' +
-        '</div>';
-      card.querySelector('.name').textContent = list.name;
+        '</div>' +
+        '<button class="drag-handle" aria-label="Arrastar para reordenar">☰</button>';
+
+      var nameEl = card.querySelector('.name');
+      nameEl.value = list.name;
+
+      nameEl.addEventListener('click', function (e) { e.stopPropagation(); });
+      nameEl.addEventListener('input', function () { autoGrow(nameEl); });
+      nameEl.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); nameEl.blur(); }
+      });
+      nameEl.addEventListener('blur', function () {
+        var val = nameEl.value.trim();
+        if (!val) { nameEl.value = list.name; return; }
+        if (val !== list.name) { list.name = val; save(); }
+      });
+
+      setupDragReorder(container, card, card.querySelector('.drag-handle'), state.lists, list, function () {
+        save();
+        renderHome();
+      });
+
       card.addEventListener('click', function () { showDetail(list.id); });
       container.appendChild(card);
+      autoGrow(nameEl);
     });
   }
 
@@ -305,20 +408,46 @@
       row.className = 'item-row' + (item.done ? ' done' : '');
       row.innerHTML =
         '<div class="check">' + (item.done ? '✓' : '') + '</div>' +
-        '<div class="text"></div>' +
+        '<textarea class="text" rows="1"></textarea>' +
+        '<button class="drag-handle" aria-label="Arrastar para reordenar">☰</button>' +
         '<button class="delete" aria-label="Excluir">🗑️</button>';
-      row.querySelector('.text').textContent = item.text;
+
+      var textEl = row.querySelector('.text');
+      textEl.value = item.text;
+
       row.querySelector('.check').addEventListener('click', function () {
         item.done = !item.done;
         save();
         renderDetail();
       });
+
+      textEl.addEventListener('input', function () { autoGrow(textEl); });
+      textEl.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); textEl.blur(); }
+      });
+      textEl.addEventListener('blur', function () {
+        var val = textEl.value.trim();
+        if (!val) { textEl.value = item.text; return; }
+        if (val !== item.text) {
+          item.text = val;
+          learnFromText(val, list.id);
+          save();
+        }
+      });
+
+      setupDragReorder(container, row, row.querySelector('.drag-handle'), list.items, item, function () {
+        save();
+        renderDetail();
+      });
+
       row.querySelector('.delete').addEventListener('click', function () {
         list.items = list.items.filter(function (i) { return i.id !== item.id; });
         save();
         renderDetail();
       });
+
       container.appendChild(row);
+      autoGrow(textEl);
     });
   }
 
@@ -351,6 +480,7 @@
         learnFromText(text2, list.id);
         save();
         input.value = '';
+        autoGrow(input);
         hideAddSuggestion();
         renderHome();
         alert('Adicionado em ' + list.emoji + ' ' + list.name + '.');
@@ -377,6 +507,7 @@
       state.lists.push(newList);
       save();
       input.value = '';
+      autoGrow(input);
       hideAddSuggestion();
       renderHome();
       alert('Lista ' + newCat.def.emoji + ' ' + newCat.def.name + ' criada com o item.');
@@ -384,9 +515,17 @@
   }
 
   document.getElementById('add-item-input').addEventListener('input', function () {
+    autoGrow(this);
     var val = this.value;
     clearTimeout(addSuggestionTimer);
     addSuggestionTimer = setTimeout(function () { updateAddSuggestion(val); }, 250);
+  });
+
+  document.getElementById('add-item-input').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      document.getElementById('add-item-form').requestSubmit();
+    }
   });
 
   document.getElementById('add-item-form').addEventListener('submit', function (e) {
@@ -398,6 +537,7 @@
     list.items.push({ id: uid(), text: text, done: false });
     learnFromText(text, list.id);
     input.value = '';
+    autoGrow(input);
     hideAddSuggestion();
     save();
     renderDetail();
