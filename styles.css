@@ -166,6 +166,30 @@ body {
   margin: 10px 16px 0;
 }
 
+.filter-bar {
+  display: flex;
+  gap: 6px;
+  padding: 0 12px 6px;
+  flex-shrink: 0;
+}
+
+.filter-choice {
+  flex: 1;
+  background: var(--card-2);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  border-radius: 8px;
+  padding: 6px 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.filter-choice.selected {
+  background: rgba(10,132,255,.15);
+  border-color: var(--accent);
+  color: var(--text);
+}
+
 .items-container {
   flex: 1;
   overflow-y: auto;

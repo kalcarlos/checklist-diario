@@ -68,6 +68,7 @@
 
   var state = null;
   var currentListId = null;
+  var itemFilter = 'all'; // 'all' | 'done' | 'pending'
   var recentDragEndAt = 0; // evita abrir/clicar em algo por engano logo após soltar um arrasto
 
   // ---------- persistência ----------
@@ -438,6 +439,7 @@
 
   function showDetail(listId) {
     currentListId = listId;
+    itemFilter = 'all';
     screenHome.classList.add('hidden');
     screenDetail.classList.remove('hidden');
     var input = document.getElementById('add-item-input');
@@ -539,6 +541,10 @@
       ? 'Lista diária: os itens desmarcam sozinhos todo dia à meia-noite.'
       : 'Lista simples: marque os itens e use "Limpar concluídos" quando quiser.';
 
+    document.querySelectorAll('#item-filter .filter-choice').forEach(function (btn) {
+      btn.classList.toggle('selected', btn.dataset.filter === itemFilter);
+    });
+
     var container = document.getElementById('items-container');
     container.innerHTML = '';
 
@@ -550,14 +556,28 @@
       return;
     }
 
-    list.items.forEach(function (item) {
+    var visibleItems = list.items.filter(function (item) {
+      if (itemFilter === 'done') return item.done;
+      if (itemFilter === 'pending') return !item.done;
+      return true;
+    });
+
+    if (visibleItems.length === 0) {
+      var liEmpty = document.createElement('li');
+      liEmpty.className = 'empty-state';
+      liEmpty.textContent = itemFilter === 'done' ? 'Nenhum item marcado.' : 'Nenhum item pendente.';
+      container.appendChild(liEmpty);
+      return;
+    }
+
+    visibleItems.forEach(function (item) {
       var row = document.createElement('li');
       row.className = 'item-row' + (item.done ? ' done' : '');
       row.innerHTML =
         '<div class="check">' + (item.done ? '✓' : '') + '</div>' +
         '<textarea class="text" rows="1" readonly></textarea>' +
         '<button class="edit-btn" aria-label="Editar texto">✏️</button>' +
-        '<button class="drag-handle" aria-label="Arrastar para reordenar">' + DRAG_ICON + '</button>' +
+        (itemFilter === 'all' ? '<button class="drag-handle" aria-label="Arrastar para reordenar">' + DRAG_ICON + '</button>' : '') +
         '<button class="delete" aria-label="Excluir">🗑️</button>';
 
       var textEl = row.querySelector('.text');
@@ -590,10 +610,12 @@
         textEl.setSelectionRange(textEl.value.length, textEl.value.length);
       });
 
-      setupDragReorder(container, row, row.querySelector('.drag-handle'), list.items, item, function () {
-        save();
-        renderDetail();
-      });
+      if (itemFilter === 'all') {
+        setupDragReorder(container, row, row.querySelector('.drag-handle'), list.items, item, function () {
+          save();
+          renderDetail();
+        });
+      }
 
       row.querySelector('.delete').addEventListener('click', function () {
         moveItemToTrash(list, item);
@@ -699,6 +721,13 @@
 
   document.getElementById('btn-back').addEventListener('click', showHome);
 
+  document.querySelectorAll('#item-filter .filter-choice').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      itemFilter = btn.dataset.filter;
+      renderDetail();
+    });
+  });
+
   // ---------- modal helper ----------
 
   var backdrop = document.getElementById('modal-backdrop');
@@ -789,6 +818,8 @@
         '<input id="m-reminder-time" type="time" value="' + list.reminder.time + '"></label>' +
       '<p class="hint" style="margin:0;">Pra receber esse aviso mesmo com o app fechado, ative "Notificações" em Ajustes.</p>' +
       '<button id="m-rename" class="btn btn-secondary">Renomear</button>' +
+      '<button id="m-check-all" class="btn btn-secondary">Marcar todos</button>' +
+      '<button id="m-uncheck-all" class="btn btn-secondary">Desmarcar todos</button>' +
       '<button id="m-clear" class="btn btn-secondary">Limpar concluídos</button>' +
       '<button id="m-delete" class="btn btn-danger">Excluir lista</button>' +
       '<button id="m-cancel" class="btn btn-secondary">Fechar</button>'
@@ -815,9 +846,24 @@
       }
     });
 
-    document.getElementById('m-clear').addEventListener('click', function () {
-      list.items = list.items.filter(function (i) { return !i.done; });
+    document.getElementById('m-check-all').addEventListener('click', function () {
+      list.items.forEach(function (i) { i.done = true; });
       save();
+      closeModal();
+      renderDetail();
+    });
+
+    document.getElementById('m-uncheck-all').addEventListener('click', function () {
+      list.items.forEach(function (i) { i.done = false; });
+      save();
+      closeModal();
+      renderDetail();
+    });
+
+    document.getElementById('m-clear').addEventListener('click', function () {
+      list.items.filter(function (i) { return i.done; }).forEach(function (i) {
+        moveItemToTrash(list, i);
+      });
       closeModal();
       renderDetail();
     });
