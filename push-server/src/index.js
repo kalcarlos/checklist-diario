@@ -202,7 +202,9 @@ async function handleDataSave(request, env) {
   }
   const record = { data: body.data, updatedAt: Date.now() };
   await env.SUBSCRIPTIONS.put('data:' + body.code, JSON.stringify(record));
-  return new Response('ok');
+  return new Response(JSON.stringify({ ok: true, updatedAt: record.updatedAt }), {
+    headers: { 'Content-Type': 'application/json' }
+  });
 }
 
 async function handleDataLoad(request, env) {

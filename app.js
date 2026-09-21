@@ -3,6 +3,8 @@
 
   var STORAGE_KEY = 'checklist-diario:v1';
   var SYNC_CODE_KEY = 'checklist-diario:syncCode';
+  var LAST_SYNC_KEY = 'checklist-diario:lastSyncedAt';
+  var CLOUD_POLL_INTERVAL_MS = 20000;
   var EMOJI_CHOICES = [
     '🏠', '🛒', '💊', '📞', '🧺', '🐶', '🐱', '💼', '🧹', '🚗', '💰', '🏋️',
     '📚', '🍽️', '🧴', '🪴', '👶', '🎂', '🎁', '✈️', '🏥', '🦷', '👓', '💇',
@@ -801,6 +803,14 @@
     cloudBackupTimer = setTimeout(uploadCloudBackup, 2000);
   }
 
+  function getLastSyncedAt() {
+    return Number(localStorage.getItem(LAST_SYNC_KEY) || 0);
+  }
+
+  function setLastSyncedAt(ts) {
+    localStorage.setItem(LAST_SYNC_KEY, String(ts));
+  }
+
   function uploadCloudBackup() {
     var code = getSyncCode();
     if (!code) return Promise.resolve();
@@ -808,6 +818,11 @@
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ code: code, data: state })
+    }).then(function (resp) {
+      if (!resp.ok) return;
+      return resp.json();
+    }).then(function (result) {
+      if (result && result.updatedAt) setLastSyncedAt(result.updatedAt);
     }).catch(function () {});
   }
 
@@ -819,9 +834,50 @@
     }).then(function (resp) {
       if (!resp.ok) throw new Error(resp.status === 404 ? 'codigo nao encontrado' : 'erro no servidor');
       return resp.json();
-    }).then(function (record) {
-      return record.data;
     });
+  }
+
+  // Puxa a nuvem sem esperar o usuário mandar: se outro aparelho salvou algo
+  // mais novo, atualiza os dados locais sozinho (checagem por horário, sem
+  // tempo real de verdade, mas automático o bastante pra não precisar
+  // restaurar manualmente).
+  function checkCloudForUpdates() {
+    var code = getSyncCode();
+    if (!code) return Promise.resolve();
+    return fetch(PUSH_SERVER_URL + '/data/load', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code: code })
+    }).then(function (resp) {
+      if (!resp.ok) return null;
+      return resp.json();
+    }).then(function (record) {
+      if (!record || !record.updatedAt) return;
+      if (record.updatedAt <= getLastSyncedAt()) return; // nada mais novo que o nosso
+
+      state = record.data;
+      ensureReminderDefaults();
+      ensureWordStatsDefaults();
+      if (!state.lastResetDate) state.lastResetDate = todayStr();
+      applyDailyReset();
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); // não usa save() pra não reenviar pra nuvem
+      setLastSyncedAt(record.updatedAt);
+
+      if (currentListId) renderDetail(); else renderHome();
+    }).catch(function () {});
+  }
+
+  var cloudPollTimer = null;
+
+  function startCloudPolling() {
+    stopCloudPolling();
+    if (!getSyncCode()) return;
+    cloudPollTimer = setInterval(checkCloudForUpdates, CLOUD_POLL_INTERVAL_MS);
+  }
+
+  function stopCloudPolling() {
+    clearInterval(cloudPollTimer);
+    cloudPollTimer = null;
   }
 
   function refreshCloudUI() {
@@ -833,6 +889,7 @@
         '<p class="hint" style="margin:0;">Seu código de sincronização (anote e use nos outros aparelhos):</p>' +
         '<input id="m-cloud-code" type="text" value="' + code + '" readonly ' +
           'style="font-size:20px;letter-spacing:2px;text-align:center;font-weight:700;">' +
+        '<p class="hint" style="margin:0;">Sincroniza sozinho a cada ~20s enquanto o app estiver aberto nos aparelhos.</p>' +
         '<button id="m-cloud-backup-now" class="btn btn-secondary">Fazer backup agora</button>';
       document.getElementById('m-cloud-backup-now').addEventListener('click', function () {
         uploadCloudBackup().then(function () { alert('Backup enviado.'); });
@@ -844,21 +901,24 @@
       document.getElementById('m-cloud-create').addEventListener('click', function () {
         setSyncCode(generateSyncCode());
         uploadCloudBackup();
+        startCloudPolling();
         refreshCloudUI();
       });
       document.getElementById('m-cloud-restore').addEventListener('click', function () {
         var code = prompt('Digite o código de sincronização do outro aparelho:');
         if (!code) return;
         code = code.trim().toUpperCase();
-        downloadCloudBackup(code).then(function (data) {
+        downloadCloudBackup(code).then(function (record) {
           if (!confirm('Isso substitui todos os dados atuais pelos da nuvem. Continuar?')) return;
-          state = data;
+          state = record.data;
           ensureReminderDefaults();
           ensureWordStatsDefaults();
           if (!state.lastResetDate) state.lastResetDate = todayStr();
           applyDailyReset();
-          save();
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
           setSyncCode(code);
+          setLastSyncedAt(record.updatedAt || Date.now());
+          startCloudPolling();
           closeModal();
           showHome();
         }).catch(function (err) {
@@ -995,6 +1055,10 @@
     if (document.visibilityState === 'visible') {
       applyDailyReset();
       if (currentListId) renderDetail(); else renderHome();
+      checkCloudForUpdates();
+      startCloudPolling();
+    } else {
+      stopCloudPolling();
     }
   });
 
@@ -1030,4 +1094,6 @@
 
   load();
   showHome();
+  checkCloudForUpdates();
+  startCloudPolling();
 })();
