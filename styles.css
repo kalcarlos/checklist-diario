@@ -1,16 +1,29 @@
 :root {
-  color-scheme: dark;
-  --bg: #0b1220;
-  --card: #161f31;
-  --card-2: #1e293e;
-  --text: #f2f4f8;
-  --text-dim: #9aa4b8;
+  color-scheme: light dark;
+  --bg: #f5f6fa;
+  --card: #ffffff;
+  --card-2: #eef1f6;
+  --text: #111827;
+  --text-dim: #6b7280;
   --accent: #0a84ff;
-  --danger: #ff453a;
-  --done: #30d158;
-  --border: #263248;
+  --danger: #ff3b30;
+  --done: #34c759;
+  --border: #e1e5ea;
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0b1220;
+    --card: #161f31;
+    --card-2: #1e293e;
+    --text: #f2f4f8;
+    --text-dim: #9aa4b8;
+    --danger: #ff453a;
+    --done: #30d158;
+    --border: #263248;
+  }
 }
 
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -482,3 +495,20 @@ body {
 }
 
 .settings-row:last-child { border-bottom: none; }
+
+.lock-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  color: var(--text);
+}
+
+.lock-screen.hidden { display: none; }
+
+.lock-screen .lock-icon { font-size: 48px; }

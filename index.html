@@ -25,6 +25,7 @@
     <header class="topbar">
       <button id="btn-trash" class="icon-btn" aria-label="Lixeira">🗑️</button>
       <h1>Checklist Diário</h1>
+      <button id="btn-search" class="icon-btn" aria-label="Buscar">🔍</button>
       <button id="btn-settings" class="icon-btn" aria-label="Ajustes">⚙️</button>
     </header>
     <div id="lists-container" class="lists-container"></div>
@@ -57,6 +58,13 @@
 <!-- Modal genérico (nova lista / editar lista / ajustes) -->
 <div id="modal-backdrop" class="modal-backdrop hidden">
   <div id="modal" class="modal"></div>
+</div>
+
+<!-- Bloqueio do app (Face ID / Touch ID / senha do aparelho) -->
+<div id="lock-screen" class="lock-screen hidden">
+  <div class="lock-icon">🔒</div>
+  <p>Checklist Diário</p>
+  <button id="btn-unlock" class="btn btn-primary" style="max-width:220px;">Desbloquear</button>
 </div>
 
 <script src="app.js"></script>

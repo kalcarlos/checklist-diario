@@ -230,6 +230,7 @@ async function runScheduledCheck(env) {
       if (!reminder.enabled) continue;
       if (reminder.time !== hm) continue;
       if (reminder.lastSentDate === date) continue;
+      if (reminder.hasPending === false) { reminder.lastSentDate = date; changed = true; continue; }
 
       try {
         await sendWebPush(record.subscription, {

@@ -58,4 +58,12 @@ node gen-icons.js
 
 Em Ajustes → "Criar backup na nuvem" gera um código de sincronização e passa a fazer backup automático (Cloudflare KV, mesmo Worker dos lembretes) toda vez que você mexe numa lista. Em outro aparelho, use "Restaurar de um código" com esse mesmo código pra recuperar tudo.
 
-Limitação: não tem senha/criptografia nesse backup, só o código como trava (evite guardar algo sensível nas listas). Também não é sincronização em tempo real entre aparelhos — é "o último que salvou, vale": se editar em dois aparelhos ao mesmo tempo sem sincronizar entre as edições, o último backup sobrescreve o outro.
+Limitação: não tem senha/criptografia nesse backup, só o código como trava (evite guardar algo sensível nas listas). Também não é sincronização em tempo real entre aparelhos — é "o último que salvou, vale" com checagem a cada ~5s enquanto o app está aberto: se editar em dois aparelhos ao mesmo tempo sem sincronizar entre as edições, o último backup sobrescreve o outro.
+
+## Outros recursos
+
+- **Busca** (🔍 na home): procura um texto em todos os itens de todas as listas.
+- **Ordenar por** (menu ⋯ da lista): manual (arrastar), alfabética, ou pendentes primeiro. Arrastar só funciona no modo manual.
+- **Vários horários de lembrete** por lista, e o lembrete não dispara se a lista já estiver toda feita.
+- **Bloqueio do app** (Ajustes): pede Face ID/Touch ID/senha do aparelho pra abrir, usando WebAuthn — a chave fica só no aparelho, não sincroniza.
+- **Lixeira** (🗑️ na home): listas e itens excluídos ficam recuperáveis por 7 dias.

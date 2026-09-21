@@ -4,7 +4,7 @@
   var STORAGE_KEY = 'checklist-diario:v1';
   var SYNC_CODE_KEY = 'checklist-diario:syncCode';
   var LAST_SYNC_KEY = 'checklist-diario:lastSyncedAt';
-  var CLOUD_POLL_INTERVAL_MS = 20000;
+  var CLOUD_POLL_INTERVAL_MS = 5000;
   var TRASH_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 
   // Ícone de "alça" pra arrastar (SVG em vez de emoji/texto, pra ficar
@@ -302,7 +302,7 @@
   function createList(name, emoji, type) {
     var list = {
       id: uid(), name: name, emoji: emoji, type: type,
-      reminder: { enabled: false, time: '08:00' }, items: []
+      reminder: { enabled: false, times: ['08:00'] }, sortOrder: 'manual', items: []
     };
     seedListHints(list);
     return list;
@@ -348,7 +348,12 @@
 
   function ensureReminderDefaults() {
     state.lists.forEach(function (list) {
-      if (!list.reminder) list.reminder = { enabled: false, time: '08:00' };
+      if (!list.reminder) list.reminder = { enabled: false, times: ['08:00'] };
+      if (!list.reminder.times) {
+        list.reminder.times = [list.reminder.time || '08:00'];
+        delete list.reminder.time;
+      }
+      if (!list.sortOrder) list.sortOrder = 'manual';
     });
   }
 
@@ -411,6 +416,14 @@
   function save() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     scheduleCloudBackup();
+    scheduleReminderSync();
+  }
+
+  var reminderSyncTimer = null;
+
+  function scheduleReminderSync() {
+    clearTimeout(reminderSyncTimer);
+    reminderSyncTimer = setTimeout(function () { syncPushSubscription(); }, 3000);
   }
 
   function applyDailyReset() {
@@ -562,6 +575,14 @@
       return true;
     });
 
+    if (list.sortOrder === 'alpha') {
+      visibleItems.sort(function (a, b) { return a.text.localeCompare(b.text, 'pt-BR', { sensitivity: 'base' }); });
+    } else if (list.sortOrder === 'pending-first') {
+      visibleItems.sort(function (a, b) { return (a.done === b.done) ? 0 : (a.done ? 1 : -1); });
+    }
+
+    var canReorder = itemFilter === 'all' && list.sortOrder === 'manual';
+
     if (visibleItems.length === 0) {
       var liEmpty = document.createElement('li');
       liEmpty.className = 'empty-state';
@@ -577,7 +598,7 @@
         '<div class="check">' + (item.done ? '✓' : '') + '</div>' +
         '<textarea class="text" rows="1" readonly></textarea>' +
         '<button class="edit-btn" aria-label="Editar texto">✏️</button>' +
-        (itemFilter === 'all' ? '<button class="drag-handle" aria-label="Arrastar para reordenar">' + DRAG_ICON + '</button>' : '') +
+        (canReorder ? '<button class="drag-handle" aria-label="Arrastar para reordenar">' + DRAG_ICON + '</button>' : '') +
         '<button class="delete" aria-label="Excluir">🗑️</button>';
 
       var textEl = row.querySelector('.text');
@@ -610,7 +631,7 @@
         textEl.setSelectionRange(textEl.value.length, textEl.value.length);
       });
 
-      if (itemFilter === 'all') {
+      if (canReorder) {
         setupDragReorder(container, row, row.querySelector('.drag-handle'), list.items, item, function () {
           save();
           renderDetail();
@@ -806,18 +827,80 @@
 
   // ---------- menu da lista (⋯) ----------
 
-  document.getElementById('btn-list-menu').addEventListener('click', function () {
-    var list = getList(currentListId);
-    if (!list) return;
+  function buildShareText(list) {
+    var lines = list.items.map(function (i) { return (i.done ? '✅ ' : '⬜ ') + i.text; });
+    return list.emoji + ' ' + list.name + '\n' + (lines.length ? lines.join('\n') : '(sem itens)');
+  }
+
+  function shareList(list) {
+    var text = buildShareText(list);
+    if (navigator.share) {
+      navigator.share({ title: list.name, text: text }).catch(function () {});
+      return;
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function () {
+        alert('Lista copiada pra área de transferência.');
+      }).catch(function () {
+        prompt('Copie o texto abaixo:', text);
+      });
+      return;
+    }
+    prompt('Copie o texto abaixo:', text);
+  }
+
+  function openListIconPicker(list) {
+    var chosenEmoji = list.emoji;
+    openModal(
+      '<h2>Trocar ícone</h2>' +
+      '<div id="m-emojis" class="emoji-row"></div>' +
+      '<div class="modal-actions">' +
+        '<button id="m-back" class="btn btn-secondary">Voltar</button>' +
+        '<button id="m-save" class="btn btn-primary">Salvar</button>' +
+      '</div>'
+    );
+
+    var emojiRow = document.getElementById('m-emojis');
+    EMOJI_CHOICES.forEach(function (em) {
+      var span = document.createElement('span');
+      span.className = 'emoji-choice' + (em === chosenEmoji ? ' selected' : '');
+      span.textContent = em;
+      span.addEventListener('click', function () {
+        chosenEmoji = em;
+        emojiRow.querySelectorAll('.emoji-choice').forEach(function (el) { el.classList.remove('selected'); });
+        span.classList.add('selected');
+      });
+      emojiRow.appendChild(span);
+    });
+
+    document.getElementById('m-back').addEventListener('click', function () { openListMenu(list); });
+    document.getElementById('m-save').addEventListener('click', function () {
+      list.emoji = chosenEmoji;
+      save();
+      openListMenu(list);
+    });
+  }
+
+  function openListMenu(list) {
+    document.getElementById('detail-title').textContent = list.emoji + ' ' + list.name;
+
+    var SORT_LABELS = { manual: 'Manual (arrastar)', alpha: 'Alfabética', 'pending-first': 'Pendentes primeiro' };
+    var SORT_NEXT = { manual: 'alpha', alpha: 'pending-first', 'pending-first': 'manual' };
 
     openModal(
       '<h2>' + list.emoji + ' ' + escapeHtml(list.name) + '</h2>' +
       '<label class="settings-row"><span>Lembrete diário</span>' +
         '<input id="m-reminder-enabled" type="checkbox"' + (list.reminder.enabled ? ' checked' : '') + '></label>' +
-      '<label class="settings-row"><span>Horário</span>' +
-        '<input id="m-reminder-time" type="time" value="' + list.reminder.time + '"></label>' +
-      '<p class="hint" style="margin:0;">Pra receber esse aviso mesmo com o app fechado, ative "Notificações" em Ajustes.</p>' +
+      '<div id="m-reminder-times"></div>' +
+      '<button id="m-add-time" class="btn btn-secondary" style="padding:8px;">+ Adicionar horário</button>' +
+      '<p class="hint" style="margin:0;">Pra receber esse aviso mesmo com o app fechado, ative "Notificações" em Ajustes. Não avisa se a lista já estiver toda feita.</p>' +
+      '<div class="settings-row"><span>Ícone</span><button id="m-change-icon" class="btn btn-secondary" style="flex:none;">' + list.emoji + ' Trocar</button></div>' +
+      '<div class="settings-row"><span>Tipo</span><button id="m-change-type" class="btn btn-secondary" style="flex:none;">' +
+        (list.type === 'rotina' ? 'Rotina diária' : 'Lista simples') + '</button></div>' +
+      '<div class="settings-row"><span>Ordenar por</span><button id="m-sort-order" class="btn btn-secondary" style="flex:none;">' +
+        SORT_LABELS[list.sortOrder] + '</button></div>' +
       '<button id="m-rename" class="btn btn-secondary">Renomear</button>' +
+      '<button id="m-share" class="btn btn-secondary">Compartilhar</button>' +
       '<button id="m-check-all" class="btn btn-secondary">Marcar todos</button>' +
       '<button id="m-uncheck-all" class="btn btn-secondary">Desmarcar todos</button>' +
       '<button id="m-clear" class="btn btn-secondary">Limpar concluídos</button>' +
@@ -825,16 +908,62 @@
       '<button id="m-cancel" class="btn btn-secondary">Fechar</button>'
     );
 
-    function saveReminder() {
-      list.reminder.enabled = document.getElementById('m-reminder-enabled').checked;
-      list.reminder.time = document.getElementById('m-reminder-time').value || '08:00';
-      save();
-      syncPushSubscription();
+    function renderTimesList() {
+      var box = document.getElementById('m-reminder-times');
+      box.innerHTML = list.reminder.times.map(function (t, idx) {
+        return '<div class="settings-row">' +
+          '<input type="time" class="m-time-input" data-idx="' + idx + '" value="' + t + '">' +
+          (list.reminder.times.length > 1
+            ? '<button class="btn btn-secondary m-time-remove" data-idx="' + idx + '" style="flex:none;padding:8px 10px;">Remover</button>'
+            : '') +
+          '</div>';
+      }).join('');
+      box.querySelectorAll('.m-time-input').forEach(function (el) {
+        el.addEventListener('change', function () {
+          list.reminder.times[Number(el.dataset.idx)] = el.value || '08:00';
+          save();
+        });
+      });
+      box.querySelectorAll('.m-time-remove').forEach(function (el) {
+        el.addEventListener('click', function () {
+          list.reminder.times.splice(Number(el.dataset.idx), 1);
+          save();
+          renderTimesList();
+        });
+      });
     }
-    document.getElementById('m-reminder-enabled').addEventListener('change', saveReminder);
-    document.getElementById('m-reminder-time').addEventListener('change', saveReminder);
+    renderTimesList();
+
+    document.getElementById('m-add-time').addEventListener('click', function () {
+      list.reminder.times.push('08:00');
+      save();
+      renderTimesList();
+    });
+
+    document.getElementById('m-reminder-enabled').addEventListener('change', function () {
+      list.reminder.enabled = this.checked;
+      save();
+    });
 
     document.getElementById('m-cancel').addEventListener('click', closeModal);
+
+    document.getElementById('m-change-icon').addEventListener('click', function () {
+      openListIconPicker(list);
+    });
+
+    document.getElementById('m-change-type').addEventListener('click', function () {
+      list.type = list.type === 'rotina' ? 'lista' : 'rotina';
+      save();
+      openListMenu(list);
+      renderDetail();
+    });
+
+    document.getElementById('m-sort-order').addEventListener('click', function () {
+      list.sortOrder = SORT_NEXT[list.sortOrder];
+      save();
+      openListMenu(list);
+      renderDetail();
+    });
 
     document.getElementById('m-rename').addEventListener('click', function () {
       var novo = prompt('Novo nome da lista:', list.name);
@@ -844,6 +973,10 @@
         closeModal();
         renderDetail();
       }
+    });
+
+    document.getElementById('m-share').addEventListener('click', function () {
+      shareList(list);
     });
 
     document.getElementById('m-check-all').addEventListener('click', function () {
@@ -875,6 +1008,12 @@
         showHome();
       }
     });
+  }
+
+  document.getElementById('btn-list-menu').addEventListener('click', function () {
+    var list = getList(currentListId);
+    if (!list) return;
+    openListMenu(list);
   });
 
   function escapeHtml(s) {
@@ -937,6 +1076,57 @@
 
   document.getElementById('btn-trash').addEventListener('click', renderTrashModal);
 
+  // ---------- busca entre todas as listas ----------
+
+  function renderSearchResults(query) {
+    var box = document.getElementById('m-search-results');
+    var q = normalizeAccents(query.toLowerCase()).trim();
+    if (!q) { box.innerHTML = ''; return; }
+
+    var results = [];
+    state.lists.forEach(function (list) {
+      list.items.forEach(function (item) {
+        if (normalizeAccents(item.text.toLowerCase()).indexOf(q) !== -1) {
+          results.push({ list: list, item: item });
+        }
+      });
+    });
+
+    if (results.length === 0) {
+      box.innerHTML = '<p class="hint" style="margin:0;">Nada encontrado.</p>';
+      return;
+    }
+
+    box.innerHTML = results.map(function (r) {
+      return '<div class="settings-row search-result" data-list="' + r.list.id + '">' +
+        '<span>' + (r.item.done ? '✅ ' : '⬜ ') + escapeHtml(r.item.text) + '</span>' +
+        '<span class="hint" style="margin:0;flex-shrink:0;">' + r.list.emoji + ' ' + escapeHtml(r.list.name) + '</span>' +
+      '</div>';
+    }).join('');
+
+    box.querySelectorAll('.search-result').forEach(function (el) {
+      el.style.cursor = 'pointer';
+      el.addEventListener('click', function () {
+        closeModal();
+        showDetail(el.dataset.list);
+      });
+    });
+  }
+
+  document.getElementById('btn-search').addEventListener('click', function () {
+    openModal(
+      '<h2>🔍 Buscar</h2>' +
+      '<input id="m-search-input" type="text" placeholder="Digite pra buscar…" ' +
+        'style="background:var(--card-2);border:1px solid var(--border);border-radius:10px;padding:12px 14px;color:var(--text);font-size:16px;">' +
+      '<div id="m-search-results" style="display:flex;flex-direction:column;gap:8px;"></div>' +
+      '<button id="m-cancel" class="btn btn-secondary">Fechar</button>'
+    );
+    document.getElementById('m-cancel').addEventListener('click', closeModal);
+    var input = document.getElementById('m-search-input');
+    input.addEventListener('input', function () { renderSearchResults(input.value); });
+    input.focus();
+  });
+
   // ---------- ajustes (exportar / importar) ----------
 
   document.getElementById('btn-settings').addEventListener('click', function () {
@@ -950,6 +1140,9 @@
       '<div class="settings-row"><span>Importar backup (.json)</span><button id="m-import" class="btn btn-secondary" style="flex:none;">Importar</button></div>' +
       '<input id="m-import-file" type="file" accept="application/json" class="hidden" style="display:none;">' +
       '<div class="settings-row"><span>Verificar atualização do app</span><button id="m-check-update" class="btn btn-secondary" style="flex:none;">Verificar</button></div>' +
+      '<div class="settings-row"><span>Sugestão de categoria</span><button id="m-reset-learning" class="btn btn-secondary" style="flex:none;">Resetar aprendizado</button></div>' +
+      '<div class="settings-row"><span>Bloqueio do app (Face ID/Touch ID)</span><button id="m-app-lock" class="btn btn-secondary" style="flex:none;">' +
+        (isAppLockEnabled() ? 'Desativar' : 'Ativar') + '</button></div>' +
       '<button id="m-cancel" class="btn btn-secondary">Fechar</button>'
     );
 
@@ -966,6 +1159,24 @@
     });
     document.getElementById('m-push-toggle').addEventListener('click', function () {
       togglePushNotifications();
+    });
+
+    document.getElementById('m-app-lock').addEventListener('click', function () {
+      if (isAppLockEnabled()) {
+        if (confirm('Desativar o bloqueio do app?')) { disableAppLock(); closeModal(); }
+        return;
+      }
+      enableAppLock().then(function (ok) {
+        if (ok) { alert('Bloqueio ativado.'); closeModal(); }
+      });
+    });
+
+    document.getElementById('m-reset-learning').addEventListener('click', function () {
+      if (!confirm('Isso apaga o que o app aprendeu com seus itens (as categorias iniciais continuam). Continuar?')) return;
+      state.wordListStats = {};
+      state.lists.forEach(function (l) { seedListHints(l); });
+      save();
+      alert('Aprendizado resetado.');
     });
 
     document.getElementById('m-cancel').addEventListener('click', closeModal);
@@ -1139,7 +1350,7 @@
         '<p class="hint" style="margin:0;">Seu código de sincronização (anote e use nos outros aparelhos):</p>' +
         '<input id="m-cloud-code" type="text" value="' + code + '" readonly ' +
           'style="font-size:20px;letter-spacing:2px;text-align:center;font-weight:700;">' +
-        '<p class="hint" style="margin:0;">Sincroniza sozinho a cada ~20s enquanto o app estiver aberto nos aparelhos.</p>' +
+        '<p class="hint" style="margin:0;">Sincroniza sozinho a cada ~5s enquanto o app estiver aberto nos aparelhos.</p>' +
         '<button id="m-cloud-backup-now" class="btn btn-secondary">Fazer backup agora</button>';
       document.getElementById('m-cloud-backup-now').addEventListener('click', function () {
         uploadCloudBackup().then(function () { alert('Backup enviado.'); });
@@ -1199,11 +1410,16 @@
   }
 
   function buildRemindersPayload() {
-    return state.lists
-      .filter(function (l) { return l.reminder && l.reminder.enabled; })
-      .map(function (l) {
-        return { listId: l.id, listName: l.name, emoji: l.emoji, time: l.reminder.time, enabled: true };
+    var out = [];
+    state.lists
+      .filter(function (l) { return l.reminder && l.reminder.enabled && l.reminder.times.length; })
+      .forEach(function (l) {
+        var hasPending = l.items.some(function (i) { return !i.done; });
+        l.reminder.times.forEach(function (t) {
+          out.push({ listId: l.id, listName: l.name, emoji: l.emoji, time: t, enabled: true, hasPending: hasPending });
+        });
       });
+    return out;
   }
 
   function syncPushSubscription() {
@@ -1300,16 +1516,103 @@
     });
   }
 
+  // ---------- bloqueio do app (Face ID / Touch ID / senha do aparelho) ----------
+
+  var APP_LOCK_KEY = 'checklist-diario:appLock';
+
+  function getAppLock() {
+    try { return JSON.parse(localStorage.getItem(APP_LOCK_KEY) || 'null'); } catch (e) { return null; }
+  }
+
+  function isAppLockEnabled() {
+    var lock = getAppLock();
+    return !!(lock && lock.enabled);
+  }
+
+  function bufToBase64url(buf) {
+    var bytes = new Uint8Array(buf), bin = '';
+    for (var i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+    return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }
+
+  function base64urlToBuf(str) {
+    var b64 = str.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(str.length / 4) * 4, '=');
+    var bin = atob(b64);
+    var bytes = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return bytes.buffer;
+  }
+
+  function webAuthnSupported() {
+    return !!(window.PublicKeyCredential && navigator.credentials);
+  }
+
+  function enableAppLock() {
+    if (!webAuthnSupported()) {
+      alert('Este navegador/aparelho não suporta bloqueio por Face ID/Touch ID/senha.');
+      return Promise.resolve(false);
+    }
+    return navigator.credentials.create({
+      publicKey: {
+        challenge: crypto.getRandomValues(new Uint8Array(32)),
+        rp: { name: 'Checklist Diário' },
+        user: { id: crypto.getRandomValues(new Uint8Array(16)), name: 'checklist', displayName: 'Checklist Diário' },
+        pubKeyCredParams: [{ type: 'public-key', alg: -7 }, { type: 'public-key', alg: -257 }],
+        authenticatorSelection: { authenticatorAttachment: 'platform', userVerification: 'required' },
+        timeout: 60000
+      }
+    }).then(function (cred) {
+      localStorage.setItem(APP_LOCK_KEY, JSON.stringify({ enabled: true, credentialId: bufToBase64url(cred.rawId) }));
+      return true;
+    }).catch(function (err) {
+      alert('Não foi possível ativar o bloqueio: ' + err.message);
+      return false;
+    });
+  }
+
+  function disableAppLock() {
+    localStorage.removeItem(APP_LOCK_KEY);
+  }
+
+  function verifyAppLock() {
+    var lock = getAppLock();
+    if (!lock || !lock.enabled) return Promise.resolve(true);
+    return navigator.credentials.get({
+      publicKey: {
+        challenge: crypto.getRandomValues(new Uint8Array(32)),
+        allowCredentials: [{ id: base64urlToBuf(lock.credentialId), type: 'public-key' }],
+        userVerification: 'required',
+        timeout: 60000
+      }
+    }).then(function () { return true; }).catch(function () { return false; });
+  }
+
+  function showLockScreen() {
+    document.getElementById('lock-screen').classList.remove('hidden');
+  }
+
+  function hideLockScreen() {
+    document.getElementById('lock-screen').classList.add('hidden');
+  }
+
+  function tryUnlock() {
+    verifyAppLock().then(function (ok) { if (ok) hideLockScreen(); });
+  }
+
+  document.getElementById('btn-unlock').addEventListener('click', tryUnlock);
+
   // ---------- reset diário ao voltar pro app ----------
 
   document.addEventListener('visibilitychange', function () {
     if (document.visibilityState === 'visible') {
+      if (isAppLockEnabled()) { showLockScreen(); tryUnlock(); }
       applyDailyReset();
       purgeOldTrash();
       if (currentListId) renderDetail(); else renderHome();
       checkCloudForUpdates();
       startCloudPolling();
     } else {
+      if (isAppLockEnabled()) showLockScreen();
       stopCloudPolling();
     }
   });
@@ -1348,4 +1651,5 @@
   showHome();
   checkCloudForUpdates();
   startCloudPolling();
+  if (isAppLockEnabled()) { showLockScreen(); tryUnlock(); }
 })();
