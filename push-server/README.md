@@ -54,7 +54,10 @@ npx wrangler d1 execute checklist-diario-db --remote --file=schema.sql
 
 O `schema.sql` é idempotente (`CREATE TABLE IF NOT EXISTS`); rode de novo depois de alterá-lo, e só então `npx wrangler deploy`.
 
-- Rotas: `/auth/register|login|google|logout|me`, `/lists` (GET), `/lists/:id` (PUT/DELETE), `/lists/:id/invites`, `/invites/accept`, `/lists/:id/members/:userId`.
+- Rotas: `/auth/register|login|google|logout|me` (GET/PATCH/DELETE), `/auth/google/link`, `/lists` (GET), `/lists/:id` (PUT/DELETE), `/lists/:id/invites`, `/invites/accept`, `/lists/:id/members/:userId`.
 - Permissões são checadas aqui: dono grava tudo, editor só `items` e `lastResetDate`, leitor recebe 403.
 - Login com Google: `GOOGLE_CLIENT_ID` em `[vars]` deve ser igual ao `GOOGLE_CLIENT_ID` de `../app.js`. As origens do app precisam estar autorizadas no Client ID (Google Cloud → Credenciais).
-- Sessões duram 30 dias; login e cadastro têm limite de tentativas (KV).
+- `POST /auth/google/link`: vincula uma conta Google à conta usuário+senha já logada (em vez de criar/logar outra). 409 se aquele Google já estiver noutra conta ou se a conta atual já tiver outro Google vinculado.
+- `PATCH /auth/me`: troca o nome de usuário (`{username}}`, 3–24 caracteres, limitado a 5/hora por conta). `DELETE /auth/me`: apaga a conta e tudo que só existe por causa dela (sessões, convites, vínculos do Google, listas que ela é dona — some pra quem mais usa também — e sua entrada em `list_members` de listas de outros donos). Sem confirmação por e-mail, porque não existe e-mail: a UI faz dupla confirmação antes de chamar essa rota.
+- Sessões duram 30 dias; login e cadastro têm limite de tentativas (KV). Cada lista aceita no máximo 20 membros além do dono (`MAX_MEMBERS` em `src/lists.js`); acima disso, `POST /invites/accept` devolve 409.
+- Lembrete diário é só do cliente (por pessoa, nunca sincroniza): o `data` de cada lista salvo no servidor não inclui `reminder`.

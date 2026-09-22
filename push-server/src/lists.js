@@ -7,6 +7,7 @@ const LIST_ID_RE = /^[A-Za-z0-9_-]{4,40}$/;
 const MAX_LIST_BYTES = 256 * 1024;
 const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const INVITE_USES = 10;
+const MAX_MEMBERS = 20; // alem do dono
 // Campos que o editor pode mudar; o resto (nome, emoji, tipo, lembrete...) e so do dono.
 const EDITOR_FIELDS = ['items', 'lastResetDate'];
 
@@ -158,6 +159,13 @@ export async function handleInviteAccept(request, env, user) {
   const list = await env.DB.prepare('SELECT owner_id AS ownerId FROM lists WHERE id = ?').bind(invite.listId).first();
   if (!list) return fail(404, 'convite invalido ou expirado');
   if (list.ownerId === user.id) return fail(409, 'essa lista ja e sua');
+
+  const already = await env.DB.prepare('SELECT 1 AS x FROM list_members WHERE list_id = ? AND user_id = ?')
+    .bind(invite.listId, user.id).first();
+  if (!already) {
+    const count = await env.DB.prepare('SELECT COUNT(*) AS n FROM list_members WHERE list_id = ?').bind(invite.listId).first();
+    if (count.n >= MAX_MEMBERS) return fail(409, 'essa lista ja atingiu o limite de ' + MAX_MEMBERS + ' membros');
+  }
 
   // Consome o uso de forma atomica; so entra quem conseguiu decrementar.
   const used = await env.DB.prepare('UPDATE invites SET uses_left = uses_left - 1 WHERE code = ? AND uses_left > 0').bind(code).run();

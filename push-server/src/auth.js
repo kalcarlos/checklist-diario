@@ -124,6 +124,46 @@ export async function handleMe(request, env, user) {
   return json({ user: { id: user.id, username: user.username } });
 }
 
+// Troca so o nome de usuario (a senha continua igual). Nao mexe em sessoes.
+export async function handleUsernameChange(request, env, user) {
+  const body = await readJson(request);
+  const username = body && typeof body.username === 'string' ? body.username.trim() : '';
+  if (!USERNAME_RE.test(username)) return fail(400, 'usuario deve ter 3 a 24 caracteres (letras, numeros, _ . -)');
+  if (username.toLowerCase() === user.username.toLowerCase()) return json({ user: { id: user.id, username } });
+
+  const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
+  if (!(await underRateLimit(env, 'rename:' + user.id, 5, 3600))) {
+    return fail(429, 'muitas trocas de usuario, tente mais tarde');
+  }
+  const taken = await env.DB.prepare('SELECT 1 AS x FROM users WHERE username = ? AND id != ?').bind(username, user.id).first();
+  if (taken) return fail(409, 'esse usuario ja existe');
+  try {
+    await env.DB.prepare('UPDATE users SET username = ? WHERE id = ?').bind(username, user.id).run();
+  } catch (e) {
+    return fail(409, 'esse usuario ja existe');
+  }
+  return json({ user: { id: user.id, username } });
+}
+
+// Apaga a conta e tudo que depende dela: sessoes, identidades Google, participacao em
+// listas de outras pessoas e as proprias listas (dono nao tem pra quem transferir).
+export async function handleAccountDelete(request, env, user) {
+  const ownedLists = await env.DB.prepare('SELECT id FROM lists WHERE owner_id = ?').bind(user.id).all();
+  const stmts = [];
+  ownedLists.results.forEach((l) => {
+    stmts.push(env.DB.prepare('DELETE FROM invites WHERE list_id = ?').bind(l.id));
+    stmts.push(env.DB.prepare('DELETE FROM list_members WHERE list_id = ?').bind(l.id));
+  });
+  stmts.push(env.DB.prepare('DELETE FROM lists WHERE owner_id = ?').bind(user.id));
+  stmts.push(env.DB.prepare('DELETE FROM list_members WHERE user_id = ?').bind(user.id));
+  stmts.push(env.DB.prepare('DELETE FROM invites WHERE created_by = ?').bind(user.id));
+  stmts.push(env.DB.prepare('DELETE FROM oauth_identities WHERE user_id = ?').bind(user.id));
+  stmts.push(env.DB.prepare('DELETE FROM sessions WHERE user_id = ?').bind(user.id));
+  stmts.push(env.DB.prepare('DELETE FROM users WHERE id = ?').bind(user.id));
+  await env.DB.batch(stmts);
+  return json({ ok: true });
+}
+
 // ---------- login com Google ----------
 // O app manda o ID token (JWT) do Google; aqui conferimos assinatura, emissor, publico e validade.
 
@@ -199,4 +239,30 @@ export async function handleGoogleLogin(request, env) {
     return fail(409, 'nao foi possivel criar a conta, tente de novo');
   }
   return json({ token: await createSession(env, id), user: { id, username } });
+}
+
+// Vincula o Google a uma conta ja logada (usuario+senha), em vez de criar conta nova.
+export async function handleGoogleLink(request, env, user) {
+  if (!env.GOOGLE_CLIENT_ID) return fail(503, 'login com Google nao configurado');
+  const body = await readJson(request);
+  const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
+  if (!(await underRateLimit(env, 'google-ip:' + ip, 30, 300))) return fail(429, 'muitas tentativas, espere alguns minutos');
+
+  const payload = body ? await verifyGoogleToken(body.credential, env).catch(() => null) : null;
+  if (!payload) return fail(401, 'login com Google invalido');
+
+  const existing = await env.DB.prepare(
+    "SELECT user_id AS userId FROM oauth_identities WHERE provider = 'google' AND subject = ?"
+  ).bind(payload.sub).first();
+  if (existing && existing.userId === user.id) return json({ ok: true, alreadyLinked: true });
+  if (existing) return fail(409, 'essa conta Google ja esta vinculada a outro usuario');
+
+  const already = await env.DB.prepare(
+    "SELECT 1 AS x FROM oauth_identities WHERE provider = 'google' AND user_id = ?"
+  ).bind(user.id).first();
+  if (already) return fail(409, 'sua conta ja tem um Google vinculado');
+
+  await env.DB.prepare("INSERT INTO oauth_identities (provider, subject, user_id, email) VALUES ('google', ?, ?, ?)")
+    .bind(payload.sub, user.id, payload.email || null).run();
+  return json({ ok: true });
 }

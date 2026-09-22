@@ -6,7 +6,10 @@
 // pra recuperar em outro aparelho (rotas /data/save e /data/load).
 
 import { fail } from './util.js';
-import { authenticate, handleGoogleLogin, handleRegister, handleLogin, handleLogout, handleMe } from './auth.js';
+import {
+  authenticate, handleGoogleLogin, handleGoogleLink, handleRegister, handleLogin, handleLogout, handleMe,
+  handleUsernameChange, handleAccountDelete,
+} from './auth.js';
 import {
   handleListsGet, handleListPut, handleListDelete, handleInviteCreate, handleInvitesList,
   handleInviteRevoke, handleInviteAccept, handleMemberPatch, handleMemberDelete,
@@ -39,8 +42,8 @@ async function routeAccounts(request, env, url) {
   if (method === 'POST' && path === '/auth/login') return handleLogin(request, env);
   if (method === 'POST' && path === '/auth/google') return handleGoogleLogin(request, env);
 
-  const isProtected = path === '/auth/logout' || path === '/auth/me' || path === '/lists' ||
-    path.startsWith('/lists/') || path === '/invites/accept';
+  const isProtected = path === '/auth/logout' || path === '/auth/me' || path === '/auth/google/link' ||
+    path === '/lists' || path.startsWith('/lists/') || path === '/invites/accept';
   if (!isProtected) return null;
 
   const user = await authenticate(request, env);
@@ -48,6 +51,9 @@ async function routeAccounts(request, env, url) {
 
   if (method === 'POST' && path === '/auth/logout') return handleLogout(request, env, user);
   if (method === 'GET' && path === '/auth/me') return handleMe(request, env, user);
+  if (method === 'PATCH' && path === '/auth/me') return handleUsernameChange(request, env, user);
+  if (method === 'DELETE' && path === '/auth/me') return handleAccountDelete(request, env, user);
+  if (method === 'POST' && path === '/auth/google/link') return handleGoogleLink(request, env, user);
   if (method === 'GET' && path === '/lists') return handleListsGet(request, env, user);
   if (method === 'POST' && path === '/invites/accept') return handleInviteAccept(request, env, user);
 

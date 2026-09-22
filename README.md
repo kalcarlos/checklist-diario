@@ -56,9 +56,11 @@ node gen-icons.js
 
 ## Contas e compartilhamento
 
-Ao abrir o app dá pra criar uma conta (usuário + senha) ou continuar sem conta. Com conta, as listas sincronizam entre aparelhos (Cloudflare D1, mesmo Worker dos lembretes) a cada ~5s e podem ser compartilhadas: no menu da lista, "Compartilhar com pessoas" gera um convite (link ou código, vale 7 dias) com papel **editor** (mexe nos itens) ou **leitor** (só vê). O dono também renomeia, exclui e gerencia membros. As permissões são aplicadas pelo servidor. Conflitos são resolvidos por item.
+Ao abrir o app dá pra criar uma conta (usuário + senha) ou continuar sem conta. Também dá pra entrar/criar conta com login do Google, ou vincular o Google a uma conta usuário+senha já existente (em Ajustes → "Vincular login com Google"). Com conta, as listas sincronizam entre aparelhos (Cloudflare D1, mesmo Worker dos lembretes) a cada ~5s e podem ser compartilhadas: no menu da lista, "Compartilhar com pessoas" gera um convite (link ou código, vale 7 dias) com papel **editor** (mexe nos itens) ou **leitor** (só vê). O dono também renomeia, exclui e gerencia membros. As permissões são aplicadas pelo servidor. Conflitos são resolvidos por item. Cada lista aceita no máximo 20 membros além do dono. Quando alguém aceita um convite, o dono recebe um aviso na hora (na próxima sincronização do aparelho dele).
 
-Não há recuperação de senha (não existe e-mail): anote a sua. No primeiro login o app oferece enviar as listas do aparelho pra conta. Quem já usava o antigo código de sincronização continua podendo usá-lo enquanto não entrar numa conta (esses backups não são migrados automaticamente).
+Em Ajustes também dá pra trocar o nome de usuário e excluir a própria conta (apaga o login e as listas que você é dono; elas somem pra quem mais usa também, mas ficam como cópia local em quem já tinha sincronizado). Não há recuperação de senha (não existe e-mail): anote a sua. No primeiro login o app oferece enviar as listas do aparelho pra conta. Quem já usava o antigo código de sincronização continua podendo usá-lo enquanto não entrar numa conta (esses backups não são migrados automaticamente).
+
+O lembrete diário de cada lista é por pessoa: numa lista compartilhada, cada um escolhe o próprio horário no menu da lista, mesmo quem não é dono — isso nunca sincroniza entre contas.
 
 ## Outros recursos
 

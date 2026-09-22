@@ -976,13 +976,16 @@
     var isItems = canEditItems(list);
 
     var html = '<h2>' + list.emoji + ' ' + escapeHtml(list.name) + '</h2>';
+    // Lembrete é por pessoa: cada um configura o seu, mesmo numa lista compartilhada
+    // onde só o dono edita nome/ícone/tipo.
+    html +=
+      '<label class="settings-row"><span>Lembrete diário</span>' +
+        '<input id="m-reminder-enabled" type="checkbox"' + (list.reminder.enabled ? ' checked' : '') + '></label>' +
+      '<div id="m-reminder-times"></div>' +
+      '<button id="m-add-time" class="btn btn-secondary" style="padding:8px;">+ Adicionar horário</button>' +
+      '<p class="hint" style="margin:0;">Pra receber esse aviso mesmo com o app fechado, ative "Notificações" em Ajustes. Não avisa se a lista já estiver toda feita. Esse lembrete é só seu; cada pessoa na lista escolhe o próprio horário.</p>';
     if (isMeta) {
       html +=
-        '<label class="settings-row"><span>Lembrete diário</span>' +
-          '<input id="m-reminder-enabled" type="checkbox"' + (list.reminder.enabled ? ' checked' : '') + '></label>' +
-        '<div id="m-reminder-times"></div>' +
-        '<button id="m-add-time" class="btn btn-secondary" style="padding:8px;">+ Adicionar horário</button>' +
-        '<p class="hint" style="margin:0;">Pra receber esse aviso mesmo com o app fechado, ative "Notificações" em Ajustes. Não avisa se a lista já estiver toda feita.</p>' +
         '<div class="settings-row"><span>Ícone</span><button id="m-change-icon" class="btn btn-secondary" style="flex:none;">' + list.emoji + ' Trocar</button></div>' +
         '<div class="settings-row"><span>Tipo</span><button id="m-change-type" class="btn btn-secondary" style="flex:none;">' +
           (list.type === 'rotina' ? 'Rotina diária' : 'Lista simples') + '</button></div>' +
@@ -1390,9 +1393,10 @@
   }
 
   // O que vai pro servidor de cada lista (o resto, como role/rev, é só local).
+  // reminder fica de fora: é por pessoa/aparelho, nunca sincroniza.
   function listData(list) {
     return {
-      name: list.name, emoji: list.emoji, type: list.type, reminder: list.reminder,
+      name: list.name, emoji: list.emoji, type: list.type,
       sortOrder: list.sortOrder, items: list.items, lastResetDate: list.lastResetDate
     };
   }
@@ -1425,7 +1429,7 @@
     list.name = d.name;
     list.emoji = d.emoji;
     list.type = d.type;
-    list.reminder = d.reminder || list.reminder || { enabled: false, times: ['08:00'] };
+    // reminder não vem do servidor: é local por pessoa (ensureReminderDefaults cuida do padrão).
     list.sortOrder = d.sortOrder || 'manual';
     list.items = d.items;
     if (d.lastResetDate) list.lastResetDate = d.lastResetDate;
@@ -1464,7 +1468,7 @@
     var local = listData(list);
     var d = rec.data;
     var merged = {};
-    ['name', 'emoji', 'type', 'sortOrder', 'reminder', 'lastResetDate'].forEach(function (f) {
+    ['name', 'emoji', 'type', 'sortOrder', 'lastResetDate'].forEach(function (f) {
       var changedHere = list.base && canon(local[f]) !== canon(base[f]);
       merged[f] = changedHere ? local[f] : d[f];
     });
@@ -1483,7 +1487,7 @@
           // o servidor mantém o nome/ícone/etc. do dono
           var d = res.data.data;
           list.name = d.name; list.emoji = d.emoji; list.type = d.type;
-          list.reminder = d.reminder || list.reminder; list.sortOrder = d.sortOrder || list.sortOrder;
+          list.sortOrder = d.sortOrder || list.sortOrder;
           list.base = clone(d);
         } else {
           list.base = sent;
@@ -1534,13 +1538,24 @@
 
   function membersChanged(a, b) { return canon(a || []) !== canon(b || []); }
 
+  // Avisa o dono quando alguém novo entra na lista (aceitou convite).
+  function notifyNewMembers(local, rec) {
+    if (local.role !== 'owner') return;
+    var before = {};
+    (local.members || []).forEach(function (m) { before[m.userId] = true; });
+    var novos = (rec.members || []).filter(function (m) { return !before[m.userId]; });
+    novos.forEach(function (m) {
+      alert(m.username + ' entrou na lista "' + local.name + '" como ' + (ROLE_LABELS[m.role] || m.role) + '.');
+    });
+  }
+
   function mergeServerLists(serverLists) {
     var changed = false, present = {};
     serverLists.forEach(function (rec) {
       present[rec.id] = true;
       var local = getList(rec.id);
       if (!local) {
-        var fresh = { id: rec.id };
+        var fresh = { id: rec.id, reminder: { enabled: false, times: ['08:00'] } };
         applyServerList(fresh, rec);
         state.lists.push(fresh);
         changed = true;
@@ -1548,6 +1563,7 @@
       }
       if (!local.role) return; // cópia local que não é da conta
       if (local.role !== rec.role || local.ownerName !== rec.ownerName || membersChanged(local.members, rec.members)) {
+        notifyNewMembers(local, rec);
         local.role = rec.role;
         local.ownerName = rec.ownerName;
         local.members = rec.members;
@@ -1782,6 +1798,44 @@
     document.head.appendChild(s);
   }
 
+  // Vincula uma conta Google à conta já logada (usuário+senha), em vez de logar/criar outra.
+  function setupGoogleLinkButton(msgEl) {
+    var btn = document.getElementById('m-google-link');
+    if (!btn) return;
+    var boxId = 'm-google-link-box';
+    if (!document.getElementById(boxId)) {
+      var box = document.createElement('div');
+      box.id = boxId;
+      box.style.display = 'flex';
+      box.style.justifyContent = 'center';
+      box.style.minHeight = '44px';
+      btn.parentNode.insertBefore(box, btn.nextSibling);
+    }
+    btn.disabled = true;
+
+    function render() {
+      var box = document.getElementById(boxId);
+      if (!box || !window.google || !google.accounts) return;
+      google.accounts.id.initialize({
+        client_id: GOOGLE_CLIENT_ID,
+        callback: function (resp) {
+          apiFetch('POST', '/auth/google/link', { credential: resp.credential }).then(function (res) {
+            if (!res.ok) { if (msgEl) msgEl.textContent = errorText(res, 'Não deu certo vincular o Google.'); return; }
+            if (msgEl) msgEl.textContent = res.data.alreadyLinked ? 'Essa conta Google já estava vinculada.' : 'Google vinculado com sucesso.';
+            box.innerHTML = '';
+          }).catch(function () { if (msgEl) msgEl.textContent = 'Sem conexão com o servidor.'; });
+        }
+      });
+      google.accounts.id.renderButton(box, { theme: 'outline', size: 'large', text: 'continue_with', locale: 'pt-BR' });
+    }
+    if (window.google && google.accounts) { render(); return; }
+    var s = document.createElement('script');
+    s.src = 'https://accounts.google.com/gsi/client';
+    s.async = true;
+    s.onload = render;
+    document.head.appendChild(s);
+  }
+
   function afterLogin(data) {
     var user = data.user || {};
     saveSession({ token: data.token, username: user.username, userId: user.id });
@@ -1859,11 +1913,15 @@
     if (session) {
       var unsent = state.lists.filter(function (l) { return !l.role; }).length;
       box.innerHTML =
-        '<div class="settings-row"><span>Conta: <strong>' + escapeHtml(session.username) + '</strong></span>' +
+        '<div class="settings-row"><span>Conta: <strong id="m-account-username">' + escapeHtml(session.username) + '</strong></span>' +
           '<button id="m-logout" class="btn btn-secondary" style="flex:none;">Sair</button></div>' +
         '<p class="hint" style="margin:0;">Suas listas sincronizam sozinhas entre os aparelhos em que você entrou (a cada ~5s com o app aberto).</p>' +
         (unsent ? '<button id="m-send-local" class="btn btn-secondary">Enviar as ' + unsent + ' lista(s) só deste aparelho pra conta</button>' : '') +
-        '<button id="m-join" class="btn btn-secondary">Entrar numa lista com convite</button>';
+        '<button id="m-join" class="btn btn-secondary">Entrar numa lista com convite</button>' +
+        '<button id="m-rename-user" class="btn btn-secondary">Trocar nome de usuário</button>' +
+        (GOOGLE_CLIENT_ID ? '<button id="m-google-link" class="btn btn-secondary">Vincular login com Google</button>' : '') +
+        '<p id="m-account-msg" class="hint" style="margin:0;"></p>' +
+        '<button id="m-delete-account" class="btn btn-danger">Excluir minha conta</button>';
       document.getElementById('m-logout').addEventListener('click', function () {
         if (!confirm('Sair da conta? As listas de outras pessoas saem deste aparelho; as suas ficam aqui como cópia.')) return;
         syncTick().then(function () {
@@ -1884,6 +1942,35 @@
         });
       }
       document.getElementById('m-join').addEventListener('click', function () { closeModal(); promptInviteCode(); });
+
+      var msgEl = document.getElementById('m-account-msg');
+      document.getElementById('m-rename-user').addEventListener('click', function () {
+        var novo = prompt('Novo nome de usuário (3 a 24 letras, números, _ . -):', session.username);
+        if (!novo || !novo.trim() || novo.trim() === session.username) return;
+        apiFetch('PATCH', '/auth/me', { username: novo.trim() }).then(function (res) {
+          if (!res.ok) { msgEl.textContent = errorText(res, 'Não deu certo trocar o nome.'); return; }
+          saveSession({ token: session.token, username: res.data.user.username, userId: session.userId });
+          refreshCloudUI();
+        }).catch(function () { msgEl.textContent = 'Sem conexão com o servidor.'; });
+      });
+
+      if (GOOGLE_CLIENT_ID) {
+        document.getElementById('m-google-link').addEventListener('click', function () {
+          setupGoogleLinkButton(msgEl);
+        });
+      }
+
+      document.getElementById('m-delete-account').addEventListener('click', function () {
+        if (!confirm('Excluir sua conta de verdade? Isso apaga seu login e as listas que você é dono (elas somem pra quem mais usa também). Suas listas ficam aqui como cópia local. Não tem como desfazer.')) return;
+        if (!confirm('Tem certeza mesmo? Essa é a última confirmação.')) return;
+        apiFetch('DELETE', '/auth/me').then(function (res) {
+          if (!res.ok) { msgEl.textContent = errorText(res, 'Não deu certo excluir a conta.'); return; }
+          detachAccount();
+          saveSession(null);
+          closeModal();
+          showHome();
+        }).catch(function () { msgEl.textContent = 'Sem conexão com o servidor.'; });
+      });
       return;
     }
 
