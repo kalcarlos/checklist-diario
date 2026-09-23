@@ -2270,10 +2270,11 @@
         rp: { name: 'Checklist Diário' },
         user: { id: crypto.getRandomValues(new Uint8Array(16)), name: 'checklist', displayName: 'Checklist Diário' },
         pubKeyCredParams: [{ type: 'public-key', alg: -7 }, { type: 'public-key', alg: -257 }],
-        // residentKey: 'discouraged' pra nao virar uma "passkey" descobrivel do sistema
-        // (some a marca "chave-senha salva no app X" e a tela do Gerenciador de Senhas do
-        // iOS; fica so uma checagem biometrica do proprio app, como era a intencao).
-        authenticatorSelection: { authenticatorAttachment: 'platform', userVerification: 'required', residentKey: 'discouraged', requireResidentKey: false },
+        // No iOS, Face ID via WebAuthn sempre aparece como "passkey salva" do sistema
+        // (Chaveiro do iCloud), mesmo com residentKey: 'discouraged' — nao tem contorno
+        // possivel a partir de um PWA (so um app nativo, via LocalAuthentication, evita
+        // essa tela). E o preco de ter Face ID sem virar app nativo.
+        authenticatorSelection: { authenticatorAttachment: 'platform', userVerification: 'required' },
         timeout: 60000
       }
     }).then(function (cred) {
