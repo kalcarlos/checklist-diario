@@ -2270,7 +2270,10 @@
         rp: { name: 'Checklist Diário' },
         user: { id: crypto.getRandomValues(new Uint8Array(16)), name: 'checklist', displayName: 'Checklist Diário' },
         pubKeyCredParams: [{ type: 'public-key', alg: -7 }, { type: 'public-key', alg: -257 }],
-        authenticatorSelection: { authenticatorAttachment: 'platform', userVerification: 'required' },
+        // residentKey: 'discouraged' pra nao virar uma "passkey" descobrivel do sistema
+        // (some a marca "chave-senha salva no app X" e a tela do Gerenciador de Senhas do
+        // iOS; fica so uma checagem biometrica do proprio app, como era a intencao).
+        authenticatorSelection: { authenticatorAttachment: 'platform', userVerification: 'required', residentKey: 'discouraged', requireResidentKey: false },
         timeout: 60000
       }
     }).then(function (cred) {
