@@ -990,7 +990,7 @@ svg.i.sm { width: 18px; height: 18px; }
 .note-links:empty { display: none; }
 .link-chip {
   display: inline-flex; align-items: center; min-height: 36px; padding: 0 var(--s-3);
-  border-radius: var(--r-pill); background: var(--accent-soft); color: var(--accent);
+  border-radius: var(--r-pill); background: color-mix(in srgb, var(--accent) 13%, var(--surface)); color: var(--accent);
   font-size: var(--fs-sm); font-weight: 650; text-decoration: none; max-width: 100%;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
