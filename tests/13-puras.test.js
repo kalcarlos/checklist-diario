@@ -54,5 +54,28 @@ console.log('4. dayKey e plain');
 ok('dayKey com zero à esquerda', P.dayKey(new Date(2026, 0, 5)) === '2026-01-05');
 ok('plain tira acentos e baixa caixa', P.plain('AMANHÃ às Ç') === 'amanha as c');
 
+console.log('5. rhythm');
+const T = new Date(2026, 9, 14);
+const key = (n) => P.dayKey(new Date(2026, 9, 14 - n));
+let r = P.rhythm({}, T);
+ok('sem dados: tudo zerado, sem melhor dia', r.active30 === 0 && r.total30 === 0 && r.avgPerActive === 0 && r.bestDow === null && r.returns === 0);
+r = P.rhythm(null, T);
+ok('entrada nula não quebra', r.active30 === 0);
+const d = {}; [1, 2, 3, 4, 5].forEach((n) => { d[key(n)] = 2; });
+r = P.rhythm(d, T);
+ok('5 dias seguidos: 5 ativos, 10 itens, média 2', r.active30 === 5 && r.total30 === 10 && r.avgPerActive === 2, r);
+ok('sem pausa: nenhuma retomada', r.returns === 0);
+// terças (dia 2) rendem mais: 14/10/2026 é quarta; terças = 13, 6, 29/9, 22/9, 15/9
+const e = {}; [1, 8, 15, 22, 29].forEach((n) => { e[key(n)] = 6; }); [2, 3, 9].forEach((n) => { e[key(n)] = 1; });
+r = P.rhythm(e, T);
+ok('melhor dia da semana é terça (2)', r.bestDow === 2, r);
+ok('poucos dias ativos (<5): sem "melhor dia"', P.rhythm({ [key(1)]: 9, [key(2)]: 1 }, T).bestDow === null);
+const f = { [key(20)]: 1, [key(19)]: 1, [key(10)]: 2, [key(2)]: 1 };
+r = P.rhythm(f, T);
+ok('retomadas: voltou após pausa de 3+ dias (2x)', r.returns === 2, r);
+ok('pausa de 2 dias não conta como retomada', P.rhythm({ [key(5)]: 1, [key(2)]: 1 }, T).returns === 0);
+ok('atividade antiga (>30 dias) não entra nos 30 dias', P.rhythm({ [key(40)]: 5 }, T).active30 === 0);
+ok('média com decimal', P.rhythm({ [key(1)]: 1, [key(2)]: 2 }, T).avgPerActive === 1.5);
+
 console.log(`\n${pass} ok, ${fail} falhas`);
 process.exit(fail ? 1 : 0);

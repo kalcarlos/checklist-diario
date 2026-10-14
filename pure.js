@@ -77,5 +77,33 @@
     return before !== JSON.stringify([game.days, game.doneLists, game.badges, game.total, game.listsDone, Object.keys(game.reviews)]);
   }
 
-  return { dayKey: dayKey, plain: plain, parseWhen: parseWhen, findLinks: findLinks, mergeProgressInto: mergeProgressInto };
+  // "Seu ritmo": leitura gentil dos últimos dias, só com o que já está no aparelho.
+  // days: { 'YYYY-MM-DD': itens marcados }. Nada aqui compara com outras pessoas.
+  function rhythm(days, today) {
+    days = days || {};
+    var t0 = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    var at = function (n) { return days[dayKey(new Date(t0.getFullYear(), t0.getMonth(), t0.getDate() - n))] || 0; };
+    var active30 = 0, total30 = 0;
+    for (var i = 0; i < 30; i++) { var c = at(i); if (c) { active30++; total30 += c; } }
+    var byDow = [0, 0, 0, 0, 0, 0, 0], activeDow = 0;
+    for (var j = 0; j < 90; j++) {
+      var c2 = at(j);
+      if (!c2) continue;
+      activeDow++;
+      byDow[new Date(t0.getFullYear(), t0.getMonth(), t0.getDate() - j).getDay()] += c2;
+    }
+    var max = Math.max.apply(null, byDow), best = null;
+    if (activeDow >= 5 && max > 0) best = byDow.indexOf(max);
+    // retomadas: dia com atividade depois de 3+ dias seguidos sem nada, havendo atividade antes da pausa
+    var returns = 0, gap = 0, seen = false;
+    for (var k = 89; k >= 0; k--) {
+      if (at(k)) { if (seen && gap >= 3) returns++; seen = true; gap = 0; } else if (seen) gap++;
+    }
+    return {
+      active30: active30, total30: total30, avgPerActive: active30 ? Math.round((total30 / active30) * 10) / 10 : 0,
+      byDow: byDow, bestDow: best, returns: returns
+    };
+  }
+
+  return { rhythm: rhythm, dayKey: dayKey, plain: plain, parseWhen: parseWhen, findLinks: findLinks, mergeProgressInto: mergeProgressInto };
 });
