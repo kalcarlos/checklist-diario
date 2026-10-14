@@ -4135,6 +4135,8 @@
     return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
   }
 
+  if (isStandalone()) document.documentElement.classList.add('standalone');
+
   function pushSupported() {
     return 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
   }
