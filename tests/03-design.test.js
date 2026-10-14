@@ -67,7 +67,7 @@ const dk=n=>{const d=new Date();const x=new Date(d.getFullYear(),d.getMonth(),d.
  await p.click('#btn-settings'); await p.waitForTimeout(400);
  ok('rolar o conteúdo não fecha a folha',await (async()=>{const t=await p.$eval('#modal',e=>e.getBoundingClientRect().top);await p.mouse.move(195,t+300);await p.mouse.down();await p.mouse.move(195,t+500,{steps:5});await p.mouse.up();await p.waitForTimeout(200);return !(await hidden(p));})());
  ok('ajustes agrupados em 6 seções',(await p.$$('.settings-label')).length===6,(await p.$$('.settings-label')).length);
- ok('3 interruptores com role=switch',(await p.$$('.switch[role="switch"]')).length===3);
+ ok('4 interruptores com role=switch (jogo, tranquilo, hoje, silenciar)',(await p.$$('.switch[role="switch"]')).length===4);
  await p.click('#m-cancel'); await p.waitForTimeout(100);
  await p.click('.list-card'); await p.click('#btn-list-menu'); await p.waitForTimeout(300);
  ok('lembrete diário vira interruptor 52x32',await p.$eval('#m-reminder-enabled',e=>{const r=e.getBoundingClientRect();return Math.round(r.width)===52&&Math.round(r.height)===32;}));

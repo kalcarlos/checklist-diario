@@ -61,3 +61,21 @@ O `schema.sql` é idempotente (`CREATE TABLE IF NOT EXISTS`); rode de novo depoi
 - `PATCH /auth/me`: troca o nome de usuário (`{username}}`, 3–24 caracteres, limitado a 5/hora por conta). `DELETE /auth/me`: apaga a conta e tudo que só existe por causa dela (sessões, convites, vínculos do Google, listas que ela é dona — some pra quem mais usa também — e sua entrada em `list_members` de listas de outros donos). Sem confirmação por e-mail, porque não existe e-mail: a UI faz dupla confirmação antes de chamar essa rota.
 - Sessões duram 30 dias; login e cadastro têm limite de tentativas (KV). Cada lista aceita no máximo 20 membros além do dono (`MAX_MEMBERS` em `src/lists.js`); acima disso, `POST /invites/accept` devolve 409.
 - Lembrete diário é só do cliente (por pessoa, nunca sincroniza): o `data` de cada lista salvo no servidor não inclui `reminder`.
+
+## Lembrete por tarefa, "silenciar hoje" e progresso sincronizado
+
+Tudo retrocompatível: o app novo funciona com o Worker antigo (só não ativa essas funções) e o Worker novo atende o app antigo.
+
+Para ativar, nesta ordem:
+
+```
+cd push-server
+npx wrangler d1 execute checklist-diario-db --remote --file=schema.sql   # cria a tabela "progress" (idempotente)
+npx wrangler deploy
+```
+
+- `POST /subscribe` aceita, além de `reminders`, `taskReminders` (`[{listId,itemId,listName,emoji,text,date,time}]`, máx. 100, só do dia atual em diante) e `muteDate` (`YYYY-MM-DD`; nesse dia nada é enviado). Responde `{ok:true, features:['task-reminders','progress']}`; o app usa isso para saber se o servidor é novo. O que já foi enviado fica marcado (`sent`/`lastSentDate`) e não repete quando o app reenvia o registro.
+- Lembrete de tarefa dispara no minuto marcado ou até 2 minutos depois (um cron perdido não some com o aviso). Inscrições expiradas (410) são removidas.
+- `GET /progress` e `PUT /progress` (login obrigatório): guardam só contagens e marcas (`days`, `doneLists`, `badges`, `total`, `listsDone`, `reviews:{seen,at}`); qualquer outro campo é descartado. O `PUT` faz merge com o que já existe e devolve o resultado (limite de 64 KB → 413). Sem a tabela, responde 501 pedindo para aplicar o `schema.sql`. Excluir a conta apaga o progresso junto.
+- Testes: `npm run test:worker` (unitários) e `npm run e2e` (Worker real local; precisa de `wrangler`, já em `devDependencies`).
+
