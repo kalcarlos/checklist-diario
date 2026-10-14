@@ -20,6 +20,18 @@
     '<circle cx="8" cy="5" r="2"/><circle cx="8" cy="12" r="2"/><circle cx="8" cy="19" r="2"/>' +
     '<circle cx="16" cy="5" r="2"/><circle cx="16" cy="12" r="2"/><circle cx="16" cy="19" r="2"/>' +
     '</svg>';
+  // Ícones de traço (SVG) — mesmos do index.html, para o que o JS desenha.
+  function icon(body, cls) {
+    return '<svg class="i' + (cls ? ' ' + cls : '') + '" viewBox="0 0 24 24" aria-hidden="true">' + body + '</svg>';
+  }
+  var ICONS = {
+    edit: icon('<path d="M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17z"/><path d="m14 7 3 3"/>', 'sm'),
+    trash: icon('<path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/>', 'sm'),
+    exit: icon('<path d="M14 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4M10 8l-4 4 4 4M6 12h10"/>', 'sm'),
+    check: icon('<path d="m5 12.5 4.5 4.5L19 7.5"/>'),
+    wind: icon('<path d="M3 8h10a2.5 2.5 0 1 0-2.5-2.5M3 12h15a3 3 0 1 1-3 3M3 16h7"/>', 'sm')
+  };
+
   var EMOJI_CHOICES = [
     '🏠', '🛒', '💊', '📞', '🧺', '🐶', '🐱', '💼', '🧹', '🚗', '💰', '🏋️',
     '📚', '🍽️', '🧴', '🪴', '👶', '🎂', '🎁', '✈️', '🏥', '🦷', '👓', '💇',
@@ -631,7 +643,7 @@
         '<div class="progress-bar big"><div style="width:' + Math.round((done / total) * 100) + '%"></div></div>';
     }
     var canFocus = canEditItems(list) && left > 0;
-    if (canFocus) html += '<button id="btn-focus" class="btn btn-secondary focus-btn">🎯 Modo foco: uma tarefa por vez</button>';
+    if (canFocus) html += '<button id="btn-focus" class="btn focus-btn">🎯 Modo foco · uma tarefa por vez</button>';
     if (!html) { box.classList.add('hidden'); box.innerHTML = ''; return; }
     box.classList.remove('hidden');
     box.innerHTML = html;
@@ -654,10 +666,12 @@
         '<div id="focus-text" class="focus-text' + (game.focusLarge ? ' large' : '') + '"></div>' +
         '<div id="focus-timer" class="focus-timer"></div>' +
         '<button id="m-focus-done" class="btn btn-primary">Feito ✓</button>' +
-        '<button id="m-focus-split" class="btn btn-secondary">Dividir em passos menores</button>' +
-        '<button id="m-focus-breathe" class="btn btn-secondary">🌬️ Respirar um pouco</button>' +
-        (pending.length > 1 ? '<button id="m-focus-skip" class="btn btn-secondary">Pular por agora</button>' : '') +
-        '<button id="m-cancel" class="btn btn-secondary">Sair do foco</button>'
+        '<div class="focus-actions">' +
+          '<button id="m-focus-split" class="btn btn-secondary">Dividir em passos</button>' +
+          '<button id="m-focus-breathe" class="btn btn-secondary">🌬️ Respirar</button>' +
+          (pending.length > 1 ? '<button id="m-focus-skip" class="btn btn-secondary">Pular por agora</button>' : '') +
+          '<button id="m-cancel" class="btn btn-secondary">Sair do foco</button>' +
+        '</div>'
       );
       document.getElementById('focus-text').textContent = item.text;
       document.getElementById('m-focus-done').addEventListener('click', function () {
@@ -798,7 +812,7 @@
           '<span class="today-text"></span><span class="today-emoji">' + t.list.emoji + '</span></div>';
       });
     }
-    html += '<button id="btn-breathe" class="breathe-btn">🌬️ Respirar um pouco</button>';
+    html += '<button id="btn-breathe" class="breathe-btn">' + ICONS.wind + 'Respirar um pouco</button>';
     box.classList.remove('hidden');
     box.innerHTML = html;
     box.querySelectorAll('.today-row').forEach(function (row) {
@@ -909,11 +923,20 @@
   var screenHome = document.getElementById('screen-home');
   var screenDetail = document.getElementById('screen-detail');
 
+  function animateIn(screen, cls) {
+    screen.classList.remove('enter-left', 'enter-right');
+    void screen.offsetWidth; // reinicia a animação
+    screen.classList.add(cls);
+    setTimeout(function () { screen.classList.remove(cls); }, 420);
+  }
+
   function showHome() {
+    var fromDetail = !screenDetail.classList.contains('hidden');
     currentListId = null;
     screenDetail.classList.add('hidden');
     screenHome.classList.remove('hidden');
     renderHome();
+    if (fromDetail) animateIn(screenHome, 'enter-left');
   }
 
   function showDetail(listId) {
@@ -921,6 +944,7 @@
     itemFilter = 'all';
     screenHome.classList.add('hidden');
     screenDetail.classList.remove('hidden');
+    animateIn(screenDetail, 'enter-right');
     var input = document.getElementById('add-item-input');
     input.value = '';
     autoGrow(input);
@@ -969,6 +993,12 @@
   }
 
   function renderHome() {
+    var dateEl = document.getElementById('home-date');
+    if (dateEl) {
+      try {
+        dateEl.textContent = new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' });
+      } catch (e) { dateEl.textContent = ''; }
+    }
     renderGameSummary();
     renderTodayBox();
     var container = document.getElementById('lists-container');
@@ -977,8 +1007,13 @@
     if (state.lists.length === 0) {
       var empty = document.createElement('div');
       empty.className = 'empty-state';
-      empty.textContent = 'Nenhuma lista ainda. Toque no + para criar sua primeira checklist.';
+      empty.innerHTML = '<div class="big">🌱</div><strong>Vamos começar?</strong>' +
+        '<span>Crie sua primeira lista. Pode ser pequena: uma coisa de cada vez já conta.</span>' +
+        '<button id="btn-empty-new" class="btn btn-primary">Criar minha primeira lista</button>';
       container.appendChild(empty);
+      document.getElementById('btn-empty-new').addEventListener('click', function () {
+        document.getElementById('btn-new-list').click();
+      });
       return;
     }
 
@@ -988,19 +1023,19 @@
       var pct = total === 0 ? 0 : Math.round((done / total) * 100);
 
       var card = document.createElement('div');
-      card.className = 'list-card';
+      card.className = 'list-card' + (total > 0 && done === total ? ' complete' : '');
       card.innerHTML =
         '<div class="emoji">' + list.emoji + '</div>' +
         '<div class="info">' +
           '<textarea class="name" rows="1" readonly></textarea>' +
-          '<div class="meta">' + (total === 0 ? 'Sem itens' : (done + ' de ' + total + ' feitos')) +
+          '<div class="meta">' + (total === 0 ? 'Sem itens' : (total > 0 && done === total ? 'Tudo feito 🎉' : done + ' de ' + total + ' feitos')) +
             (list.type === 'rotina' ? ' · diária' : '') + roleMeta(list) + '</div>' +
           '<div class="progress-bar"><div style="width:' + pct + '%"></div></div>' +
         '</div>' +
-        (canEditMeta(list) ? '<button class="edit-btn" aria-label="Renomear">✏️</button>' : '') +
+        (canEditMeta(list) ? '<button class="edit-btn" aria-label="Renomear">' + ICONS.edit + '</button>' : '') +
         '<button class="drag-handle" aria-label="Arrastar para reordenar">' + DRAG_ICON + '</button>' +
         '<button class="delete" aria-label="' + (canEditMeta(list) ? 'Excluir lista' : 'Sair da lista') + '">' +
-          (canEditMeta(list) ? '🗑️' : '🚪') + '</button>';
+          (canEditMeta(list) ? ICONS.trash : ICONS.exit) + '</button>';
 
       var nameEl = card.querySelector('.name');
       nameEl.value = list.name;
@@ -1076,7 +1111,8 @@
     if (list.items.length === 0) {
       var li = document.createElement('li');
       li.className = 'empty-state';
-      li.textContent = 'Nenhum item ainda. Adicione abaixo.';
+      li.innerHTML = '<div class="big">✨</div><strong>Lista vazia</strong>' +
+        '<span>' + (editable ? 'Escreva o primeiro item no campo abaixo. Coisas pequenas e concretas ajudam a começar.' : 'Ainda não há itens aqui.') + '</span>';
       container.appendChild(li);
       return;
     }
@@ -1098,7 +1134,9 @@
     if (visibleItems.length === 0) {
       var liEmpty = document.createElement('li');
       liEmpty.className = 'empty-state';
-      liEmpty.textContent = itemFilter === 'done' ? 'Nenhum item marcado.' : 'Nenhum item pendente.';
+      liEmpty.innerHTML = itemFilter === 'done'
+        ? '<div class="big">🌤️</div><strong>Nada marcado ainda</strong><span>Quando você marcar um item, ele aparece aqui.</span>'
+        : '<div class="big">🎉</div><strong>Nada pendente</strong><span>Tudo feito por aqui. Merece uma pausa.</span>';
       container.appendChild(liEmpty);
       return;
     }
@@ -1107,11 +1145,11 @@
       var row = document.createElement('li');
       row.className = 'item-row' + (item.done ? ' done' : '') + (item.id === justCheckedItemId ? ' just-done' : '');
       row.innerHTML =
-        '<div class="check">' + (item.done ? '✓' : '') + '</div>' +
+        '<div class="check" role="checkbox" aria-checked="' + (item.done ? 'true' : 'false') + '">' + (item.done ? ICONS.check : '') + '</div>' +
         '<textarea class="text" rows="1" readonly></textarea>' +
-        (editable ? '<button class="edit-btn" aria-label="Editar texto">✏️</button>' : '') +
+        (editable ? '<button class="edit-btn" aria-label="Editar texto">' + ICONS.edit + '</button>' : '') +
         (canReorder ? '<button class="drag-handle" aria-label="Arrastar para reordenar">' + DRAG_ICON + '</button>' : '') +
-        (editable ? '<button class="delete" aria-label="Excluir">🗑️</button>' : '');
+        (editable ? '<button class="delete" aria-label="Excluir">' + ICONS.trash + '</button>' : '');
 
       var textEl = row.querySelector('.text');
       textEl.value = item.text;
@@ -1290,6 +1328,33 @@
     if (e.target === backdrop) closeModal();
   });
 
+  // Arrastar a "alça" no topo da folha pra baixo fecha (gesto comum no iOS).
+  (function () {
+    var startY = null, dy = 0;
+    modal.addEventListener('pointerdown', function (e) {
+      var r = modal.getBoundingClientRect();
+      if (e.clientY - r.top > 36 || modal.scrollTop > 0) return;
+      startY = e.clientY; dy = 0;
+      modal.style.transition = 'none';
+      try { modal.setPointerCapture(e.pointerId); } catch (err) {}
+    });
+    modal.addEventListener('pointermove', function (e) {
+      if (startY === null) return;
+      dy = Math.max(0, e.clientY - startY);
+      modal.style.transform = 'translateY(' + dy + 'px)';
+    });
+    function end() {
+      if (startY === null) return;
+      var close = dy > 110;
+      startY = null;
+      modal.style.transition = '';
+      modal.style.transform = '';
+      if (close) closeModal();
+    }
+    modal.addEventListener('pointerup', end);
+    modal.addEventListener('pointercancel', end);
+  })();
+
   // ---------- nova lista ----------
 
   document.getElementById('btn-new-list').addEventListener('click', function () {
@@ -1420,32 +1485,42 @@
     // Lembrete é por pessoa: cada um configura o seu, mesmo numa lista compartilhada
     // onde só o dono edita nome/ícone/tipo.
     html +=
-      '<label class="settings-row"><span>Lembrete diário</span>' +
-        '<input id="m-reminder-enabled" type="checkbox"' + (list.reminder.enabled ? ' checked' : '') + '></label>' +
-      '<div id="m-reminder-times"></div>' +
-      '<button id="m-add-time" class="btn btn-secondary" style="padding:8px;">+ Adicionar horário</button>' +
-      '<p class="hint" style="margin:0;">Pra receber esse aviso mesmo com o app fechado, ative "Notificações" em Ajustes. Não avisa se a lista já estiver toda feita. Esse lembrete é só seu; cada pessoa na lista escolhe o próprio horário.</p>';
+      '<div class="settings-label">Lembrete</div>' +
+      '<div class="settings-group">' +
+        '<label class="settings-row"><span>Lembrete diário</span>' +
+          '<input id="m-reminder-enabled" type="checkbox"' + (list.reminder.enabled ? ' checked' : '') + '></label>' +
+        '<div id="m-reminder-times"></div>' +
+        '<div class="stack"><button id="m-add-time" class="btn btn-secondary small-btn">+ Adicionar horário</button></div>' +
+        '<p class="hint">Pra receber esse aviso mesmo com o app fechado, ative "Notificações" em Ajustes. Não avisa se a lista já estiver toda feita. Esse lembrete é só seu; cada pessoa na lista escolhe o próprio horário.</p>' +
+      '</div>';
     if (isMeta) {
       html +=
-        '<div class="settings-row"><span>Ícone</span><button id="m-change-icon" class="btn btn-secondary" style="flex:none;">' + list.emoji + ' Trocar</button></div>' +
-        '<div class="settings-row"><span>Tipo</span><button id="m-change-type" class="btn btn-secondary" style="flex:none;">' +
-          (list.type === 'rotina' ? 'Rotina diária' : 'Lista simples') + '</button></div>' +
-        '<div class="settings-row"><span>Ordenar por</span><button id="m-sort-order" class="btn btn-secondary" style="flex:none;">' +
-          SORT_LABELS[list.sortOrder] + '</button></div>' +
-        '<button id="m-rename" class="btn btn-secondary">Renomear</button>';
+        '<div class="settings-label">Lista</div>' +
+        '<div class="settings-group">' +
+          '<div class="settings-row"><span>Ícone</span><button id="m-change-icon" class="btn btn-secondary">' + list.emoji + ' Trocar</button></div>' +
+          '<div class="settings-row"><span>Tipo</span><button id="m-change-type" class="btn btn-secondary">' +
+            (list.type === 'rotina' ? 'Rotina diária' : 'Lista simples') + '</button></div>' +
+          '<div class="settings-row"><span>Ordenar por</span><button id="m-sort-order" class="btn btn-secondary">' +
+            SORT_LABELS[list.sortOrder] + '</button></div>' +
+          '<div class="settings-row"><span>Nome</span><button id="m-rename" class="btn btn-secondary">Renomear</button></div>' +
+        '</div>';
     }
+    html += '<div class="settings-label">Compartilhar</div><div class="settings-group"><div class="stack">';
     if (list.role) {
       html += '<button id="m-members" class="btn btn-secondary">' +
         (list.role === 'owner' ? '👥 Compartilhar com pessoas' : '👥 Ver membros') + '</button>';
     } else if (isMeta) {
       html += '<button id="m-members-local" class="btn btn-secondary">👥 Compartilhar com pessoas</button>';
     }
-    html += '<button id="m-share" class="btn btn-secondary">Copiar como texto</button>';
+    html += '<button id="m-share" class="btn btn-secondary">Copiar como texto</button></div></div>';
     if (isItems) {
       html +=
-        '<button id="m-check-all" class="btn btn-secondary">Marcar todos</button>' +
-        '<button id="m-uncheck-all" class="btn btn-secondary">Desmarcar todos</button>' +
-        '<button id="m-clear" class="btn btn-secondary">Limpar concluídos</button>';
+        '<div class="settings-label">Itens</div>' +
+        '<div class="settings-group"><div class="stack">' +
+          '<button id="m-check-all" class="btn btn-secondary">Marcar todos</button>' +
+          '<button id="m-uncheck-all" class="btn btn-secondary">Desmarcar todos</button>' +
+          '<button id="m-clear" class="btn btn-secondary">Limpar concluídos</button>' +
+        '</div></div>';
     }
     html += isMeta
       ? '<button id="m-delete" class="btn btn-danger">Excluir lista</button>'
@@ -1460,7 +1535,7 @@
         return '<div class="settings-row">' +
           '<input type="time" class="m-time-input" data-idx="' + idx + '" value="' + t + '">' +
           (list.reminder.times.length > 1
-            ? '<button class="btn btn-secondary m-time-remove" data-idx="' + idx + '" style="flex:none;padding:8px 10px;">Remover</button>'
+            ? '<button class="btn btn-secondary m-time-remove" data-idx="' + idx + '">Remover</button>'
             : '') +
           '</div>';
       }).join('');
@@ -1685,23 +1760,38 @@
   document.getElementById('btn-settings').addEventListener('click', function () {
     openModal(
       '<h2>Ajustes</h2>' +
-      '<div class="settings-row"><span>Notificações</span><button id="m-push-toggle" class="btn btn-secondary" style="flex:none;">…</button></div>' +
-      '<p id="m-push-status" class="hint" style="margin:0;"></p>' +
+      '<div class="settings-label">Foco e bem-estar</div>' +
+      '<div class="settings-group">' +
+      '<div class="settings-row"><span>Progresso e feedback ao marcar</span><button id="m-game-toggle" class="switch" role="switch" aria-label="Progresso e feedback ao marcar" aria-checked="' + (game.enabled ? 'true' : 'false') + '"><span></span></button></div>' +
+      '<div class="settings-row"><span>Modo tranquilo (sem contagens nem números)</span><button id="m-calm-toggle" class="switch" role="switch" aria-label="Modo tranquilo (sem contagens nem números)" aria-checked="' + (game.calm ? 'true' : 'false') + '"><span></span></button></div>' +
+      '<div class="settings-row"><span>“Para agora” na home (3 próximas tarefas)</span><button id="m-today-toggle" class="switch" role="switch" aria-label="“Para agora” na home (3 próximas tarefas)" aria-checked="' + (game.today !== false ? 'true' : 'false') + '"><span></span></button></div>' +
+      '</div>' +
+      '<div class="settings-label">Lembretes</div>' +
+      '<div class="settings-group">' +
+      '<div class="settings-row"><span>Notificações</span><button id="m-push-toggle" class="btn btn-secondary">…</button></div>' +
+      '<p id="m-push-status" class="hint"></p>' +
+      '</div>' +
+      '<div class="settings-label">Conta e nuvem</div>' +
+      '<div class="settings-group">' +
       '<div id="m-cloud-box" style="display:flex;flex-direction:column;gap:8px;"></div>' +
-      '<p class="hint" style="margin:0;">As listas da conta ficam no servidor (não são criptografadas de ponta a ponta) — não guarde nada muito sensível nelas.</p>' +
-      '<div class="settings-row"><span>Exportar backup (.json)</span><button id="m-export" class="btn btn-secondary" style="flex:none;">Exportar</button></div>' +
-      '<div class="settings-row"><span>Importar backup (.json)</span><button id="m-import" class="btn btn-secondary" style="flex:none;">Importar</button></div>' +
-      '<input id="m-import-file" type="file" accept="application/json" class="hidden" style="display:none;">' +
-      '<div class="settings-row"><span>Verificar atualização do app</span><button id="m-check-update" class="btn btn-secondary" style="flex:none;">Verificar</button></div>' +
-      '<div class="settings-row"><span>Progresso e feedback ao marcar</span><button id="m-game-toggle" class="btn btn-secondary" style="flex:none;">' +
-        (game.enabled ? 'Desativar' : 'Ativar') + '</button></div>' +
-      '<div class="settings-row"><span>Modo tranquilo (sem contagens nem números)</span><button id="m-calm-toggle" class="btn btn-secondary" style="flex:none;">' +
-        (game.calm ? 'Desativar' : 'Ativar') + '</button></div>' +
-      '<div class="settings-row"><span>"Para agora" na home (3 próximas tarefas)</span><button id="m-today-toggle" class="btn btn-secondary" style="flex:none;">' +
-        (game.today === false ? 'Ativar' : 'Desativar') + '</button></div>' +
-      '<div class="settings-row"><span>Sugestão de categoria</span><button id="m-reset-learning" class="btn btn-secondary" style="flex:none;">Resetar aprendizado</button></div>' +
-      '<div class="settings-row"><span>Bloqueio do app (Face ID/Touch ID)</span><button id="m-app-lock" class="btn btn-secondary" style="flex:none;">' +
+      '<p class="hint">As listas da conta ficam no servidor (não são criptografadas de ponta a ponta) — não guarde nada muito sensível nelas.</p>' +
+      '</div>' +
+      '<div class="settings-label">Segurança</div>' +
+      '<div class="settings-group">' +
+      '<div class="settings-row"><span>Bloqueio do app (Face ID/Touch ID)</span><button id="m-app-lock" class="btn btn-secondary">' +
         (isAppLockEnabled() ? 'Desativar' : 'Ativar') + '</button></div>' +
+      '</div>' +
+      '<div class="settings-label">Dados</div>' +
+      '<div class="settings-group">' +
+      '<div class="settings-row"><span>Exportar backup (.json)</span><button id="m-export" class="btn btn-secondary">Exportar</button></div>' +
+      '<div class="settings-row"><span>Importar backup (.json)</span><button id="m-import" class="btn btn-secondary">Importar</button></div>' +
+      '<input id="m-import-file" type="file" accept="application/json" class="hidden" style="display:none;">' +
+      '<div class="settings-row"><span>Sugestão de categoria</span><button id="m-reset-learning" class="btn btn-secondary">Resetar aprendizado</button></div>' +
+      '</div>' +
+      '<div class="settings-label">Aplicativo</div>' +
+      '<div class="settings-group">' +
+      '<div class="settings-row"><span>Verificar atualização do app</span><button id="m-check-update" class="btn btn-secondary">Verificar</button></div>' +
+      '</div>' +
       '<button id="m-cancel" class="btn btn-secondary">Fechar</button>'
     );
 
@@ -1730,25 +1820,19 @@
       });
     });
 
-    document.getElementById('m-game-toggle').addEventListener('click', function () {
-      game.enabled = !game.enabled;
-      saveGame();
-      closeModal();
-      if (currentListId) renderDetail(); else renderHome();
-    });
+    function bindSwitch(id, flip) {
+      var el = document.getElementById(id);
+      el.addEventListener('click', function () {
+        flip();
+        saveGame();
+        el.setAttribute('aria-checked', el.getAttribute('aria-checked') === 'true' ? 'false' : 'true');
+        if (currentListId) renderDetail(); else renderHome();
+      });
+    }
+    bindSwitch('m-game-toggle', function () { game.enabled = !game.enabled; });
 
-    document.getElementById('m-calm-toggle').addEventListener('click', function () {
-      game.calm = !game.calm;
-      saveGame();
-      closeModal();
-      if (currentListId) renderDetail(); else renderHome();
-    });
-    document.getElementById('m-today-toggle').addEventListener('click', function () {
-      game.today = game.today === false;
-      saveGame();
-      closeModal();
-      if (currentListId) renderDetail(); else renderHome();
-    });
+    bindSwitch('m-calm-toggle', function () { game.calm = !game.calm; });
+    bindSwitch('m-today-toggle', function () { game.today = game.today === false; });
 
     document.getElementById('m-reset-learning').addEventListener('click', function () {
       if (!confirm('Isso apaga o que o app aprendeu com seus itens (as categorias iniciais continuam). Continuar?')) return;

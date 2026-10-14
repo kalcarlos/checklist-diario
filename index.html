@@ -7,7 +7,8 @@
 
 <!-- PWA / iOS home screen -->
 <link rel="manifest" href="manifest.json">
-<meta name="theme-color" content="#0a84ff">
+<meta name="theme-color" content="#f4f5f9" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#090e1b" media="(prefers-color-scheme: dark)">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Checklist">
@@ -22,24 +23,26 @@
 
   <!-- Tela: lista de listas -->
   <section id="screen-home" class="screen">
-    <header class="topbar">
-      <button id="btn-trash" class="icon-btn" aria-label="Lixeira">🗑️</button>
-      <h1>Checklist Diário</h1>
-      <button id="btn-join" class="icon-btn" aria-label="Entrar com convite">🤝</button>
-      <button id="btn-search" class="icon-btn" aria-label="Buscar">🔍</button>
-      <button id="btn-settings" class="icon-btn" aria-label="Ajustes">⚙️</button>
+    <header class="topbar home-top">
+      <div class="top-title"><span id="home-date" class="eyebrow"></span><h1>Checklist Diário</h1></div>
+      <div class="actions">
+        <button id="btn-search" class="icon-btn" aria-label="Buscar"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></svg></button>
+        <button id="btn-join" class="icon-btn" aria-label="Entrar com convite"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3.2"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><path d="M16 5.2a3.2 3.2 0 0 1 0 5.6M18 14.4c1.8.8 3 2.6 3 5.6"/></svg></button>
+        <button id="btn-trash" class="icon-btn" aria-label="Lixeira"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/></svg></button>
+        <button id="btn-settings" class="icon-btn" aria-label="Ajustes"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
+      </div>
     </header>
     <div id="game-summary" class="game-summary hidden"></div>
     <div id="lists-container" class="lists-container"></div>
-    <button id="btn-new-list" class="fab" aria-label="Nova lista">+</button>
+    <button id="btn-new-list" class="fab" aria-label="Nova lista"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
   </section>
 
   <!-- Tela: detalhe de uma lista -->
   <section id="screen-detail" class="screen hidden">
     <header class="topbar">
-      <button id="btn-back" class="icon-btn" aria-label="Voltar">←</button>
+      <button id="btn-back" class="icon-btn" aria-label="Voltar"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m15 5-7 7 7 7"/></svg></button>
       <h1 id="detail-title">Lista</h1>
-      <button id="btn-list-menu" class="icon-btn" aria-label="Opções">⋯</button>
+      <button id="btn-list-menu" class="icon-btn" aria-label="Opções"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.2" fill="currentColor"/><circle cx="12" cy="12" r="1.2" fill="currentColor"/><circle cx="19" cy="12" r="1.2" fill="currentColor"/></svg></button>
     </header>
     <p id="detail-hint" class="hint"></p>
     <div id="detail-progress" class="detail-progress hidden"></div>
@@ -52,7 +55,7 @@
     <div id="add-suggestion" class="suggestion-bar hidden"></div>
     <form id="add-item-form" class="add-item-form">
       <textarea id="add-item-input" rows="1" placeholder="Adicionar item…" autocomplete="off"></textarea>
-      <button type="submit" class="icon-btn">➕</button>
+      <button type="submit" class="icon-btn" aria-label="Adicionar"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V6M6 11l6-6 6 6"/></svg></button>
     </form>
   </section>
 
