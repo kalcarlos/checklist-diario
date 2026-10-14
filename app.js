@@ -642,6 +642,7 @@
         '<div class="detail-progress-label"><span>' + label + '</span>' + (game.calm ? '' : '<span>' + done + '/' + total + '</span>') + '</div>' +
         '<div class="progress-bar big"><div style="width:' + Math.round((done / total) * 100) + '%"></div></div>';
     }
+    box.classList.toggle('is-done', total > 0 && left === 0);
     var canFocus = canEditItems(list) && left > 0;
     if (canFocus) html += '<button id="btn-focus" class="btn focus-btn">🎯 Modo foco · uma tarefa por vez</button>';
     if (!html) { box.classList.add('hidden'); box.innerHTML = ''; return; }
@@ -992,6 +993,16 @@
     done();
   }
 
+  // Cada lista ganha um tom próprio (derivado do id, sem guardar nada): ajuda a
+  // reconhecer a lista de relance sem depender de ler o nome.
+  var LIST_HUES = [214, 262, 330, 12, 38, 150, 176, 196];
+  function listHue(id) {
+    id = String(id);
+    var h = 0;
+    for (var i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
+    return LIST_HUES[h % LIST_HUES.length];
+  }
+
   function renderHome() {
     var dateEl = document.getElementById('home-date');
     if (dateEl) {
@@ -1024,6 +1035,7 @@
 
       var card = document.createElement('div');
       card.className = 'list-card' + (total > 0 && done === total ? ' complete' : '');
+      card.style.setProperty('--hue', listHue(list.id));
       card.innerHTML =
         '<div class="emoji">' + list.emoji + '</div>' +
         '<div class="info">' +
