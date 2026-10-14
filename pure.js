@@ -105,5 +105,86 @@
     };
   }
 
-  return { rhythm: rhythm, dayKey: dayKey, plain: plain, parseWhen: parseWhen, findLinks: findLinks, mergeProgressInto: mergeProgressInto };
+  // ---- sequência com perdão (1 dia de folga a cada 7 sem quebrar) ----
+  function streak(days, today, keepDays) {
+    var at = function (i) { return days[dayKey(new Date(today.getFullYear(), today.getMonth(), today.getDate() - i))]; };
+    var n = 0, lastForgive = -100;
+    var start = at(0) ? 0 : 1;
+    for (var i = start; i <= keepDays; i++) {
+      if (at(i)) { n++; continue; }
+      if (i - lastForgive >= 7) { lastForgive = i; continue; }
+      break;
+    }
+    return n;
+  }
+
+  // ---- semana de segunda a domingo; na segunda mostra a anterior inteira ----
+  function reviewWeekDays(days, doneLists, today) {
+    var dow = (today.getDay() + 6) % 7; // segunda = 0
+    var back = dow === 0 ? 7 : dow;
+    var todayKey = dayKey(today);
+    var list = [];
+    for (var i = 0; i < 7; i++) {
+      var d = new Date(today.getFullYear(), today.getMonth(), today.getDate() - (back - i));
+      var k = dayKey(d);
+      list.push({ key: k, dow: d.getDay(), count: days[k] || 0, lists: doneLists[k] || 0, future: k > todayKey, today: k === todayKey });
+    }
+    return {
+      key: list[0].key, days: list,
+      from: new Date(today.getFullYear(), today.getMonth(), today.getDate() - back),
+      to: new Date(today.getFullYear(), today.getMonth(), today.getDate() - (back - 6))
+    };
+  }
+
+  // badgeDefs: [{id,...}]; badges: { id: 'YYYY-MM-DD' }
+  function weekTotals(w, badges, badgeDefs) {
+    var total = 0, lists = 0, active = 0, best = null;
+    w.days.forEach(function (d) {
+      total += d.count; lists += d.lists;
+      if (d.count > 0) active++;
+      if (d.count > 0 && (!best || d.count > best.count)) best = d;
+    });
+    var first = w.days[0].key, last = w.days[6].key;
+    var got = badgeDefs.filter(function (b) { var at = badges[b.id]; return at && at >= first && at <= last; });
+    return { total: total, lists: lists, active: active, best: best, badges: got };
+  }
+
+  // ---- rotina por dias da semana / adiar ----
+  function isScheduledOn(list, dow) {
+    return list.type !== 'rotina' || !list.days || !list.days.length || list.days.indexOf(dow) !== -1;
+  }
+
+  function daysLabelOf(daysArr, names) {
+    var d = (daysArr || []).slice().sort();
+    if (!d.length || d.length === 7) return 'Todos os dias';
+    if (d.join() === '1,2,3,4,5') return 'Dias úteis';
+    if (d.join() === '0,6') return 'Fim de semana';
+    return d.map(function (n) { return names[n]; }).join(', ');
+  }
+
+  function isSnoozedOn(item, todayKey) { return !!item.snoozeUntil && item.snoozeUntil > todayKey; }
+
+  function snoozeLabel(dateStr, tomorrowKey) {
+    if (dateStr === tomorrowKey) return 'amanhã';
+    var p = dateStr.split('-');
+    return 'em ' + p[2] + '/' + p[1];
+  }
+
+  // ---- cooperativo: quem concluiu cada item (me = nome de quem está logado, ou null) ----
+  function contributionsOf(items, me) {
+    var by = {};
+    items.forEach(function (i) { if (i.done && i.doneBy) by[i.doneBy] = (by[i.doneBy] || 0) + 1; });
+    return Object.keys(by).map(function (n) { return { name: n, count: by[n] }; })
+      .sort(function (a, b) {
+        if (b.count !== a.count) return b.count - a.count;
+        var meA = !!me && a.name === me, meB = !!me && b.name === me;
+        if (meA !== meB) return meA ? -1 : 1; // no empate, "Você" vem primeiro
+        return a.name < b.name ? -1 : 1;
+      });
+  }
+
+  return {
+    streak: streak, reviewWeekDays: reviewWeekDays, weekTotals: weekTotals, isScheduledOn: isScheduledOn, daysLabelOf: daysLabelOf,
+    isSnoozedOn: isSnoozedOn, snoozeLabel: snoozeLabel, contributionsOf: contributionsOf,
+    rhythm: rhythm, dayKey: dayKey, plain: plain, parseWhen: parseWhen, findLinks: findLinks, mergeProgressInto: mergeProgressInto };
 });

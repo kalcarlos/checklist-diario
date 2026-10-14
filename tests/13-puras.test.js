@@ -77,5 +77,45 @@ ok('pausa de 2 dias não conta como retomada', P.rhythm({ [key(5)]: 1, [key(2)]:
 ok('atividade antiga (>30 dias) não entra nos 30 dias', P.rhythm({ [key(40)]: 5 }, T).active30 === 0);
 ok('média com decimal', P.rhythm({ [key(1)]: 1, [key(2)]: 2 }, T).avgPerActive === 1.5);
 
+console.log('6. streak (sequência com perdão)');
+const K = (n) => P.dayKey(new Date(2026, 9, 14 - n));
+const mkd = (ns) => Object.fromEntries(ns.map((n) => [K(n), 1]));
+ok('sem dados: 0', P.streak({}, T, 120) === 0);
+ok('hoje + 2 dias seguidos: 3', P.streak(mkd([0, 1, 2]), T, 120) === 3);
+ok('hoje ainda sem marcar não quebra (conta de ontem)', P.streak(mkd([1, 2, 3]), T, 120) === 3);
+ok('um dia perdido é perdoado', P.streak(mkd([0, 1, 3, 4]), T, 120) === 4);
+ok('dois perdidos em menos de 7 dias quebram', P.streak(mkd([0, 1, 4, 5]), T, 120) === 2);
+ok('perdão volta depois de 7 dias', P.streak(mkd([0, 2, 3, 4, 5, 6, 7, 8, 10]), T, 120) === 9, P.streak(mkd([0, 2, 3, 4, 5, 6, 7, 8, 10]), T, 120));
+ok('respeita o limite de dias guardados', P.streak(mkd([0, 1, 2, 3, 4, 5]), T, 2) <= 3);
+
+console.log('7. reviewWeekDays / weekTotals');
+let wk = P.reviewWeekDays({ [K(1)]: 4, [K(2)]: 2 }, { [K(1)]: 1 }, T); // quarta
+ok('quarta: semana em andamento começa na segunda (12/10)', wk.key === '2026-10-12' && wk.days.length === 7 && wk.days[0].dow === 1 && wk.days[6].dow === 0, wk.key);
+ok('marca "hoje" e dias futuros', wk.days[2].today === true && wk.days[3].future === true && wk.days[1].future === false);
+ok('contagens por dia', wk.days[1].count === 4 && wk.days[1].lists === 1 && wk.days[0].count === 2, wk.days.map((d) => d.count));
+const MON = new Date(2026, 9, 12);
+wk = P.reviewWeekDays({}, {}, MON);
+ok('segunda: mostra a semana anterior inteira (05/10)', wk.key === '2026-10-05' && wk.days.every((d) => !d.future));
+const SUN = new Date(2026, 9, 18);
+ok('domingo: semana em andamento termina hoje', P.reviewWeekDays({}, {}, SUN).days[6].today === true);
+const wt = P.weekTotals(P.reviewWeekDays({ [K(1)]: 4, [K(2)]: 2 }, { [K(1)]: 1 }, T), { first: '2026-10-13', old: '2026-09-01' }, [{ id: 'first' }, { id: 'old' }, { id: 'none' }]);
+ok('totais, dias ativos e melhor dia', wt.total === 6 && wt.lists === 1 && wt.active === 2 && wt.best.count === 4, wt);
+ok('só conquistas da semana', wt.badges.length === 1 && wt.badges[0].id === 'first');
+ok('semana vazia', P.weekTotals(P.reviewWeekDays({}, {}, T), {}, []).best === null);
+
+console.log('8. rotina, adiar e cooperativo');
+const NAMES = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'];
+ok('lista simples ignora dias', P.isScheduledOn({ type: 'lista', days: [1] }, 3) === true);
+ok('rotina sem dias: todo dia', P.isScheduledOn({ type: 'rotina' }, 3) === true && P.isScheduledOn({ type: 'rotina', days: [] }, 3) === true);
+ok('rotina só em seg/qua', P.isScheduledOn({ type: 'rotina', days: [1, 3] }, 3) === true && P.isScheduledOn({ type: 'rotina', days: [1, 3] }, 2) === false);
+ok('rótulos de dias', P.daysLabelOf([], NAMES) === 'Todos os dias' && P.daysLabelOf([0, 1, 2, 3, 4, 5, 6], NAMES) === 'Todos os dias' && P.daysLabelOf([5, 4, 3, 2, 1], NAMES) === 'Dias úteis' && P.daysLabelOf([6, 0], NAMES) === 'Fim de semana' && P.daysLabelOf([3, 1], NAMES) === 'seg, qua');
+ok('adiado até data futura', P.isSnoozedOn({ snoozeUntil: '2026-10-15' }, '2026-10-14') === true);
+ok('volta no dia marcado', P.isSnoozedOn({ snoozeUntil: '2026-10-14' }, '2026-10-14') === false && P.isSnoozedOn({}, '2026-10-14') === false);
+ok('rótulo de adiar', P.snoozeLabel('2026-10-15', '2026-10-15') === 'amanhã' && P.snoozeLabel('2026-10-20', '2026-10-15') === 'em 20/10');
+const items = [{ done: true, doneBy: 'carla' }, { done: true, doneBy: 'zeca' }, { done: true, doneBy: 'bruno' }, { done: true, doneBy: 'bruno' }, { done: false, doneBy: 'ana' }, { done: true }];
+ok('contribuições: mais itens primeiro; só concluídos com autor', P.contributionsOf(items, null).map((c) => c.name + c.count).join() === 'bruno2,carla1,zeca1');
+ok('empate: "eu" vem primeiro, mesmo depois no alfabeto', P.contributionsOf(items, 'zeca').map((c) => c.name).join() === 'bruno,zeca,carla');
+ok('sem itens: lista vazia', P.contributionsOf([], 'zeca').length === 0);
+
 console.log(`\n${pass} ok, ${fail} falhas`);
 process.exit(fail ? 1 : 0);

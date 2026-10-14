@@ -655,17 +655,7 @@
   // Sequência com perdão: um dia sem atividade não quebra a sequência, desde
   // que não tenha havido outro perdão nos 6 dias anteriores. Hoje ainda não
   // acabou, então não conta contra você.
-  function currentStreak() {
-    var n = 0;
-    var lastForgive = -100;
-    var start = game.days[dayKey(daysAgo(0))] ? 0 : 1;
-    for (var i = start; i <= GAME_KEEP_DAYS; i++) {
-      if (game.days[dayKey(daysAgo(i))]) { n++; continue; }
-      if (i - lastForgive >= 7) { lastForgive = i; continue; }
-      break;
-    }
-    return n;
-  }
+  function currentStreak() { return P.streak(game.days, daysAgo(0), GAME_KEEP_DAYS); }
 
   function vibrate(pattern) {
     try { if (navigator.vibrate) navigator.vibrate(pattern); } catch (e) {}
@@ -1239,27 +1229,15 @@
   function addDaysStr(n) { return dayKey(daysAgo(-n)); }
 
   // Adiado = some das contagens, do "Para agora" e do foco até a data chegar.
-  function isSnoozed(item) { return !!item.snoozeUntil && item.snoozeUntil > todayStr(); }
+  function isSnoozed(item) { return P.isSnoozedOn(item, todayStr()); }
   function activeItems(list) { return list.items.filter(function (i) { return !isSnoozed(i); }); }
 
-  function snoozeWhen(dateStr) {
-    if (dateStr === addDaysStr(1)) return 'amanhã';
-    var p = dateStr.split('-');
-    return 'em ' + p[2] + '/' + p[1];
-  }
+  function snoozeWhen(dateStr) { return P.snoozeLabel(dateStr, addDaysStr(1)); }
 
   // Rotina só nos dias escolhidos (sem escolha = todo dia).
-  function scheduledToday(list) {
-    return list.type !== 'rotina' || !list.days || !list.days.length || list.days.indexOf(new Date().getDay()) !== -1;
-  }
+  function scheduledToday(list) { return P.isScheduledOn(list, new Date().getDay()); }
 
-  function daysLabel(list) {
-    var d = (list.days || []).slice().sort();
-    if (!d.length || d.length === 7) return 'Todos os dias';
-    if (d.join() === '1,2,3,4,5') return 'Dias úteis';
-    if (d.join() === '0,6') return 'Fim de semana';
-    return d.map(function (n) { return WEEKDAYS[n]; }).join(', ');
-  }
+  function daysLabel(list) { return P.daysLabelOf(list.days, WEEKDAYS); }
 
   function nextScheduledLabel(list) {
     for (var i = 1; i <= 7; i++) {
@@ -1287,17 +1265,7 @@
   }
 
   // [{name, count}] dos itens concluídos (não adiados) por pessoa, do maior para o menor
-  function contributions(list) {
-    var by = {};
-    activeItems(list).forEach(function (i) { if (i.done && i.doneBy) by[i.doneBy] = (by[i.doneBy] || 0) + 1; });
-    return Object.keys(by).map(function (n) { return { name: n, count: by[n] }; })
-      .sort(function (a, b) {
-        if (b.count !== a.count) return b.count - a.count;
-        var meA = session && a.name === session.username, meB = session && b.name === session.username;
-        if (meA !== meB) return meA ? -1 : 1; // no empate, "Você" vem primeiro
-        return a.name < b.name ? -1 : 1;
-      });
-  }
+  function contributions(list) { return P.contributionsOf(activeItems(list), session ? session.username : null); }
 
   // passos (subtarefas) do item
   function stepsDoneCount(item) {
@@ -1474,29 +1442,9 @@
 
   // Semana de segunda a domingo. Na segunda-feira mostra a semana anterior inteira
   // (a nova mal começou); nos outros dias, a semana em andamento.
-  function reviewWeek() {
-    var dow = (new Date().getDay() + 6) % 7; // segunda = 0
-    var back = dow === 0 ? 7 : dow;
-    var days = [];
-    for (var i = 0; i < 7; i++) {
-      var d = daysAgo(back - i);
-      var k = dayKey(d);
-      days.push({ key: k, dow: d.getDay(), count: game.days[k] || 0, lists: game.doneLists[k] || 0, future: k > todayStr(), today: k === todayStr() });
-    }
-    return { key: days[0].key, days: days, from: daysAgo(back), to: daysAgo(back - 6) };
-  }
+  function reviewWeek() { return P.reviewWeekDays(game.days, game.doneLists, daysAgo(0)); }
 
-  function weekStats(w) {
-    var total = 0, lists = 0, active = 0, best = null;
-    w.days.forEach(function (d) {
-      total += d.count; lists += d.lists;
-      if (d.count > 0) active++;
-      if (d.count > 0 && (!best || d.count > best.count)) best = d;
-    });
-    var first = w.days[0].key, last = w.days[6].key;
-    var badges = BADGES.filter(function (b) { var at = game.badges[b.id]; return at && at >= first && at <= last; });
-    return { total: total, lists: lists, active: active, best: best, badges: badges };
-  }
+  function weekStats(w) { return P.weekTotals(w, game.badges, BADGES); }
 
   function weeklyCardWanted() {
     if (!game.enabled) return null;
