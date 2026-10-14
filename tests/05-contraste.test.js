@@ -85,6 +85,7 @@ async function measureAll(p, scheme, label, bad, counter, includeControl) {
     await p.click('.item-row:nth-child(1) .item-body'); await p.waitForTimeout(150); await measureAll(p, scheme, 'item com painel e passos', bad, counter);
     await p.click('.item-row:nth-child(3) .item-body'); await p.waitForTimeout(150);
     await p.click('[data-act="snooze"]'); await p.waitForTimeout(100); await measureAll(p, scheme, 'painel com adiar', bad, counter);
+    await p.click('[data-act="remind"]'); await p.waitForTimeout(150); await measureAll(p, scheme, 'painel com lembrete por tarefa', bad, counter);
     await p.click('.item-row:nth-child(3) .item-body'); await p.waitForTimeout(100);
     await p.click('#btn-focus'); await p.waitForTimeout(450); await measureAll(p, scheme, 'foco com passos', bad, counter); await hideModal();
     await p.click('#btn-list-menu'); await p.waitForTimeout(500); await measureAll(p, scheme, 'menu da lista', bad, counter); await hideModal();
@@ -95,6 +96,7 @@ async function measureAll(p, scheme, label, bad, counter, includeControl) {
     await p.click('#btn-game-history'); await p.waitForTimeout(500); await measureAll(p, scheme, 'histórico', bad, counter);
     await p.click('#m-open-review'); await p.waitForTimeout(400); await measureAll(p, scheme, 'revisão semanal', bad, counter); await hideModal();
     await p.click('#btn-new-list'); await p.waitForTimeout(500); await measureAll(p, scheme, 'nova lista', bad, counter); await hideModal();
+    await p.click('#btn-capture'); await p.waitForTimeout(400); await measureAll(p, scheme, 'anotar rápido', bad, counter); await hideModal();
     await p.click('#btn-breathe'); await p.waitForTimeout(500); await measureAll(p, scheme, 'respirar (som desligado)', bad, counter);
     await p.click('#m-sound-toggle'); await p.waitForTimeout(400); await measureAll(p, scheme, 'respirar (som ligado)', bad, counter);
     await p.click('#m-cancel'); await p.waitForTimeout(300);
