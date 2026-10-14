@@ -1,4 +1,4 @@
-var CACHE_NAME = 'checklist-diario-v20';
+var CACHE_NAME = 'checklist-diario-v21';
 var ASSETS = [
   './',
   './index.html',
@@ -37,8 +37,10 @@ self.addEventListener('fetch', function (event) {
   if (new URL(event.request.url).origin !== self.location.origin) return;
   // Rede primeiro (garante que uma atualização apareça na hora, sem esperar
   // um segundo ciclo de cache), só cai pro que tem salvo se estiver offline.
+  // "no-cache" revalida com o servidor: sem isso o cache HTTP do GitHub Pages
+  // (10 min) podia entregar um index.html velho junto com um app.js novo.
   event.respondWith(
-    fetch(event.request).then(function (response) {
+    fetch(event.request, { cache: 'no-cache' }).then(function (response) {
       if (response && response.status === 200) {
         var copy = response.clone();
         caches.open(CACHE_NAME).then(function (cache) { cache.put(event.request, copy); });

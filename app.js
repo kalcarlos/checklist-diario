@@ -604,8 +604,21 @@
     return first;
   }
 
+  // Se o index.html em cache for de uma versão anterior (sem esses
+  // elementos), cria o container em vez de quebrar a tela inteira.
+  function ensureBox(id, className, beforeId) {
+    var el = document.getElementById(id);
+    if (el) return el;
+    el = document.createElement('div');
+    el.id = id;
+    el.className = className + ' hidden';
+    var ref = document.getElementById(beforeId);
+    if (ref && ref.parentNode) ref.parentNode.insertBefore(el, ref); else document.body.appendChild(el);
+    return el;
+  }
+
   function renderDetailProgress(list) {
-    var box = document.getElementById('detail-progress');
+    var box = ensureBox('detail-progress', 'detail-progress', 'item-filter');
     var total = list.items.length;
     var done = list.items.filter(function (i) { return i.done; }).length;
     var left = total - done;
@@ -708,7 +721,7 @@
   }
 
   function renderGameSummary() {
-    var box = document.getElementById('game-summary');
+    var box = ensureBox('game-summary', 'game-summary', 'lists-container');
     if (!game.enabled || state.lists.length === 0) { box.classList.add('hidden'); box.innerHTML = ''; return; }
     var week = activeDaysLast7();
     var streak = currentStreak();
