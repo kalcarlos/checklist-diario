@@ -1,8 +1,9 @@
-var CACHE_NAME = 'checklist-diario-v32';
+var CACHE_NAME = 'checklist-diario-v33';
 var ASSETS = [
   './',
   './index.html',
   './styles.css',
+  './pure.js',
   './app.js',
   './manifest.json',
   './icons/icon-192.png',
