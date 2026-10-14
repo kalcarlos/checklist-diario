@@ -183,7 +183,40 @@
       });
   }
 
+  // ---- backup automático ----
+  function backupDue(lastAt, now) {
+    var startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    return !lastAt || lastAt < startToday;
+  }
+
+  function backupAge(ts, now) {
+    if (!ts) return 'ainda não enviado';
+    var d = new Date(ts), hm = String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+    var a = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+    var b = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    var diff = Math.round((b - a) / 86400000);
+    if (diff <= 0) return 'hoje às ' + hm;
+    if (diff === 1) return 'ontem às ' + hm;
+    return String(d.getDate()).padStart(2, '0') + '/' + String(d.getMonth() + 1).padStart(2, '0') + ' às ' + hm;
+  }
+
+  // 24 caracteres [A-Za-z0-9] a partir de bytes aleatórios (rejeita 248+ para não enviesar).
+  function makeBackupCode(bytes) {
+    var A = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789', out = '';
+    for (var i = 0; i < bytes.length && out.length < 24; i++) if (bytes[i] < 248) out += A.charAt(bytes[i] % 62);
+    return out.length === 24 ? out : null;
+  }
+
+  // aceita com hífens/espaços (como é mostrado); devolve null se não parecer um código
+  function normalizeBackupCode(text) {
+    var c = String(text || '').replace(/[^A-Za-z0-9]/g, '');
+    return c.length >= 6 && c.length <= 32 ? c : null;
+  }
+
+  function groupBackupCode(code) { return String(code).replace(/(.{4})(?=.)/g, '$1-'); }
+
   return {
+    backupDue: backupDue, backupAge: backupAge, makeBackupCode: makeBackupCode, normalizeBackupCode: normalizeBackupCode, groupBackupCode: groupBackupCode,
     streak: streak, reviewWeekDays: reviewWeekDays, weekTotals: weekTotals, isScheduledOn: isScheduledOn, daysLabelOf: daysLabelOf,
     isSnoozedOn: isSnoozedOn, snoozeLabel: snoozeLabel, contributionsOf: contributionsOf,
     rhythm: rhythm, dayKey: dayKey, plain: plain, parseWhen: parseWhen, findLinks: findLinks, mergeProgressInto: mergeProgressInto };

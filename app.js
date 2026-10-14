@@ -17,6 +17,7 @@
   var STORAGE_KEY = 'checklist-diario:v1';
   var SYNC_CODE_KEY = 'checklist-diario:syncCode';
   var LAST_SYNC_KEY = 'checklist-diario:lastSyncedAt';
+  var LAST_BACKUP_KEY = 'checklist-diario:lastBackupAt';
   var CLOUD_POLL_INTERVAL_MS = 5000;
   var SESSION_KEY = 'checklist-diario:session';
   var SKIP_LOGIN_KEY = 'checklist-diario:skipLogin';
@@ -2032,6 +2033,7 @@
     renderGameSummary();
     renderTodayBox();
     renderWeeklyCard();
+    renderBackupNudge();
     var container = document.getElementById('lists-container');
     container.innerHTML = '';
 
@@ -3195,6 +3197,7 @@
       '</div>' +
       '<div class="settings-label">Dados</div>' +
       '<div class="settings-group">' +
+      '<div id="m-backup-box" style="display:flex;flex-direction:column;gap:8px;"></div>' +
       '<div class="settings-row"><span>Exportar backup (.json)</span><button id="m-export" class="btn btn-secondary">Exportar</button></div>' +
       '<div class="settings-row"><span>Importar backup (.json)</span><button id="m-import" class="btn btn-secondary">Importar</button></div>' +
       '<input id="m-import-file" type="file" accept="application/json" class="hidden" style="display:none;">' +
@@ -3209,6 +3212,7 @@
 
     refreshPushUI();
     refreshCloudUI();
+    refreshBackupUI();
 
     document.getElementById('m-check-update').addEventListener('click', function () {
       if (!swRegistration) { alert('Ainda carregando, tenta de novo em alguns segundos.'); return; }
@@ -3694,7 +3698,11 @@
       if (!resp.ok) return;
       return resp.json();
     }).then(function (result) {
-      if (result && result.updatedAt) setLastSyncedAt(result.updatedAt);
+      if (result && result.updatedAt) {
+        setLastSyncedAt(result.updatedAt);
+        try { localStorage.setItem(LAST_BACKUP_KEY, String(Date.now())); } catch (e) {}
+        refreshBackupUI();
+      }
     }).catch(function () {});
   }
 
@@ -3739,6 +3747,193 @@
   function stopCloudPolling() {
     clearInterval(cloudPollTimer);
     cloudPollTimer = null;
+  }
+
+  // ---------- backup automático (sem conta) ----------
+  // Usa o código de backup: a cada alteração e, no mínimo, uma vez por dia o app envia uma
+  // cópia ao servidor. Restaurar = digitar o código num aparelho novo (ou depois de reinstalar).
+  // Quem tem conta não precisa disso: as listas já ficam na conta.
+
+  function lastBackupAt() { return Number(localStorage.getItem(LAST_BACKUP_KEY) || 0); }
+
+  function dailyBackupCheck() {
+    if (session || !getSyncCode()) return Promise.resolve();
+    if (!P.backupDue(lastBackupAt(), new Date())) return Promise.resolve();
+    return uploadCloudBackup();
+  }
+
+  function totalItemsCount() {
+    return state.lists.reduce(function (n, l) { return n + l.items.length; }, 0);
+  }
+
+  function copyText(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) return navigator.clipboard.writeText(text).then(function () { return true; }, function () { return false; });
+    return Promise.resolve(false);
+  }
+
+  function openBackupCodeModal(first) {
+    var code = getSyncCode();
+    if (!code) return;
+    var shown = P.groupBackupCode(code);
+    openModal(
+      '<h2>' + (first ? 'Backup automático ligado' : 'Seu código de backup') + '</h2>' +
+      '<p class="hint" style="margin:0;">Suas listas são enviadas sozinhas a cada alteração e ao menos uma vez por dia. ' +
+        '<strong>Guarde este código</strong> (nas Notas, em uma mensagem pra você): é ele que traz tudo de volta se você trocar de aparelho ou remover o app.</p>' +
+      '<div id="m-code" class="backup-code" aria-label="Código de backup">' + escapeHtml(shown) + '</div>' +
+      '<p id="m-code-msg" class="hint" role="status" aria-live="polite" style="margin:0;"></p>' +
+      '<button id="m-code-copy" class="btn btn-primary">Copiar código</button>' +
+      (navigator.share ? '<button id="m-code-share" class="btn btn-secondary">Compartilhar / salvar em Notas</button>' : '') +
+      '<p class="hint" style="margin:0;">O backup fica no servidor do app, sem criptografia de ponta a ponta: não guarde nada muito sensível. ' +
+        'Quem tiver o código consegue ler as listas, então não divulgue. Com uma conta (usuário e senha) você não precisa de código.</p>' +
+      '<button id="m-code-close" class="btn btn-secondary">' + (first ? 'Já guardei' : 'Fechar') + '</button>'
+    );
+    var msg = document.getElementById('m-code-msg');
+    document.getElementById('m-code-copy').addEventListener('click', function () {
+      copyText(shown).then(function (ok) { msg.textContent = ok ? 'Código copiado.' : 'Não consegui copiar; anote o código acima.'; });
+    });
+    var sh = document.getElementById('m-code-share');
+    if (sh) sh.addEventListener('click', function () {
+      navigator.share({ text: 'Código de backup do Checklist Diário: ' + shown }).catch(function () {});
+    });
+    document.getElementById('m-code-close').addEventListener('click', closeModal);
+  }
+
+  function enableAutoBackup() {
+    var bytes = new Uint8Array(64);
+    crypto.getRandomValues(bytes);
+    var code = P.makeBackupCode(Array.prototype.slice.call(bytes));
+    if (!code) return Promise.resolve();
+    try { localStorage.setItem(SYNC_CODE_KEY, code); localStorage.removeItem(LAST_BACKUP_KEY); } catch (e) {}
+    return uploadCloudBackup().then(function () {
+      openBackupCodeModal(true);
+      renderHome();
+    });
+  }
+
+  function backupNow() {
+    return uploadCloudBackup();
+  }
+
+  function disableAutoBackup() {
+    try { localStorage.removeItem(SYNC_CODE_KEY); localStorage.removeItem(LAST_BACKUP_KEY); localStorage.removeItem(LAST_SYNC_KEY); } catch (e) {}
+    renderHome();
+  }
+
+  function openRestoreModal() {
+    openModal(
+      '<h2>Restaurar com código</h2>' +
+      '<p class="hint" style="margin:0;">Digite o código de backup que você guardou (com ou sem os hífens).</p>' +
+      '<label>Código<input id="m-restore-code" type="text" autocapitalize="none" autocorrect="off" spellcheck="false" maxlength="40" placeholder="XXXX-XXXX-XXXX-XXXX-XXXX-XXXX"></label>' +
+      '<p id="m-restore-msg" class="error-msg" role="status" aria-live="polite"></p>' +
+      '<button id="m-restore-go" class="btn btn-primary">Restaurar</button>' +
+      '<button id="m-restore-close" class="btn btn-secondary">Cancelar</button>'
+    );
+    var input = document.getElementById('m-restore-code'), msg = document.getElementById('m-restore-msg'), go = document.getElementById('m-restore-go');
+    function run() {
+      var code = P.normalizeBackupCode(input.value);
+      if (!code) { msg.textContent = 'Esse código não parece certo. Confira e tente de novo.'; return; }
+      msg.textContent = ''; go.disabled = true;
+      fetch(PUSH_SERVER_URL + '/data/load', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: code }) })
+        .then(function (resp) {
+          if (resp.status === 404) { msg.textContent = 'Não encontrei nenhum backup com esse código.'; return null; }
+          if (!resp.ok) { msg.textContent = 'O servidor não respondeu direito. Tente de novo em instantes.'; return null; }
+          return resp.json();
+        })
+        .then(function (record) {
+          go.disabled = false;
+          if (!record || !record.data || !Array.isArray(record.data.lists)) { if (record) msg.textContent = 'Esse backup está vazio ou inválido.'; return; }
+          var lists = record.data.lists.length;
+          var items = record.data.lists.reduce(function (n, l) { return n + ((l.items || []).length); }, 0);
+          var when = P.backupAge(record.updatedAt, new Date());
+          var here = state.lists.length;
+          if (!confirm('Restaurar ' + lists + ' lista(s) e ' + items + ' item(ns) (backup de ' + when + ')?' +
+              (here ? '\n\nAs ' + here + ' lista(s) deste aparelho serão substituídas.' : ''))) return;
+          state = record.data;
+          ensureReminderDefaults();
+          ensureWordStatsDefaults();
+          ensureTrashDefaults();
+          if (!state.lastResetDate) state.lastResetDate = todayStr();
+          applyDailyReset();
+          try {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+            localStorage.setItem(SYNC_CODE_KEY, code);
+            setLastSyncedAt(record.updatedAt);
+            localStorage.setItem(LAST_BACKUP_KEY, String(Date.now()));
+          } catch (e) {}
+          closeModal();
+          showHome();
+          showToast('Backup restaurado.');
+        })
+        .catch(function () { go.disabled = false; msg.textContent = 'Sem conexão com o servidor.'; });
+    }
+    go.addEventListener('click', run);
+    input.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); run(); } });
+    document.getElementById('m-restore-close').addEventListener('click', closeModal);
+    setTimeout(function () { input.focus(); }, 60);
+  }
+
+  function backupNudgeWanted() {
+    if (session || getSyncCode()) return null;
+    if (game.backupNudgeHide && game.backupNudgeHide > todayStr()) return null;
+    return totalItemsCount() > 0 ? 'has' : 'empty';
+  }
+
+  function renderBackupNudge() {
+    var box = ensureBox('backup-nudge', 'backup-nudge', 'weekly-card');
+    var kind = backupNudgeWanted();
+    if (!kind) { box.classList.add('hidden'); box.innerHTML = ''; return; }
+    box.classList.remove('hidden');
+    box.innerHTML = kind === 'has'
+      ? '<div class="weekly-text"><strong>🛟 Suas listas só existem neste aparelho</strong><span>Se você remover o app ou trocar de celular, elas se perdem. Ative o backup automático (leva 5 segundos).</span></div>' +
+        '<div class="nudge-btns"><button id="btn-backup-on" class="btn btn-primary small-btn" type="button">Ativar backup automático</button>' +
+        '<button id="btn-backup-restore" class="btn btn-secondary small-btn" type="button">Restaurar com código</button>' +
+        '<button id="btn-backup-hide" class="btn btn-secondary small-btn" type="button">Agora não</button></div>'
+      : '<div class="weekly-text"><strong>🛟 Já usava o app?</strong><span>Restaure suas listas com o código do backup, ou entre na sua conta em Ajustes.</span></div>' +
+        '<div class="nudge-btns"><button id="btn-backup-restore" class="btn btn-primary small-btn" type="button">Restaurar com código</button>' +
+        '<button id="btn-backup-hide" class="btn btn-secondary small-btn" type="button">Agora não</button></div>';
+    var on = document.getElementById('btn-backup-on');
+    if (on) on.addEventListener('click', enableAutoBackup);
+    document.getElementById('btn-backup-restore').addEventListener('click', openRestoreModal);
+    document.getElementById('btn-backup-hide').addEventListener('click', function () {
+      game.backupNudgeHide = addDaysStr(3);
+      saveGame();
+      renderBackupNudge();
+    });
+  }
+
+  // Bloco "Backup" em Ajustes → Dados (refeito quando o estado muda).
+  function refreshBackupUI() {
+    var box = document.getElementById('m-backup-box');
+    if (!box) return;
+    if (session) {
+      box.innerHTML = '<p class="hint" style="margin:0;">☁️ Suas listas estão na conta e sincronizam sozinhas entre os aparelhos.</p>';
+      return;
+    }
+    if (getSyncCode()) {
+      box.innerHTML =
+        '<p class="hint" id="m-backup-status" style="margin:0;">☁️ <strong>Backup automático ativo.</strong> Último envio: ' + escapeHtml(P.backupAge(lastBackupAt(), new Date())) + '.</p>' +
+        '<button id="m-backup-code" class="btn btn-secondary">Ver meu código de backup</button>' +
+        '<button id="m-backup-now" class="btn btn-secondary">Fazer backup agora</button>' +
+        '<button id="m-backup-off" class="btn btn-secondary">Desativar backup automático</button>';
+      document.getElementById('m-backup-code').addEventListener('click', function () { openBackupCodeModal(false); });
+      document.getElementById('m-backup-now').addEventListener('click', function () {
+        var st = document.getElementById('m-backup-status');
+        if (st) st.textContent = 'Enviando…';
+        backupNow().then(refreshBackupUI);
+      });
+      document.getElementById('m-backup-off').addEventListener('click', function () {
+        if (!confirm('Desativar o backup automático? A cópia que já está no servidor continua lá, mas deixa de ser atualizada.')) return;
+        disableAutoBackup();
+        refreshBackupUI();
+      });
+      return;
+    }
+    box.innerHTML =
+      '<p class="hint" style="margin:0;">🛟 Sem backup: suas listas só existem neste aparelho (remover o app apaga tudo).</p>' +
+      '<button id="m-backup-on" class="btn btn-primary">Ativar backup automático</button>' +
+      '<button id="m-backup-restore" class="btn btn-secondary">Restaurar com código</button>';
+    document.getElementById('m-backup-on').addEventListener('click', function () { enableAutoBackup().then(refreshBackupUI); });
+    document.getElementById('m-backup-restore').addEventListener('click', openRestoreModal);
   }
 
   // ---------- login / cadastro ----------
@@ -4442,6 +4637,7 @@
       if (document.visibilityState === 'visible' && swRegistration) {
         swRegistration.update().catch(function () {});
       }
+      if (document.visibilityState === 'visible') cloudTick().then(dailyBackupCheck);
     });
   }
 
@@ -4450,7 +4646,7 @@
   load();
   showHome();
   maybeGreet();
-  cloudTick();
+  cloudTick().then(dailyBackupCheck);
   startCloudPolling();
   if (session) syncProgress();
   (function () {
