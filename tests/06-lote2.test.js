@@ -192,7 +192,6 @@ const otherDows = [0, 1, 2, 3, 4, 5, 6].filter((d) => d !== todayDow);
   ok('painel oferece "Prioridade de hoje"', /Prioridade de hoje/.test(await p.textContent('[data-act="pick"]')));
   await p.click('[data-act="pick"]'); await p.waitForTimeout(100);
   ok('item escolhido ganha chip ⭐', /prioridade de hoje/.test(await p.textContent('.item-row:nth-child(4) .item-meta')));
-  await p.click('.item-row:nth-child(4) .item-body'); await p.click('.item-row:nth-child(5) .item-body'); await p.waitForTimeout(80);
   await expand(p, 5); await p.click('[data-act="pick"]'); await p.waitForTimeout(80);
   await expand(p, 1); await p.click('[data-act="pick"]'); await p.waitForTimeout(80);
   await expand(p, 2); await p.click('[data-act="pick"]'); await p.waitForTimeout(150);
