@@ -469,6 +469,162 @@
     else localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   }
 
+  // ---------- progresso e feedback (gamificação leve) ----------
+  // Guardado à parte do estado das listas (não sincroniza nem entra no
+  // backup): é só um histórico pessoal por aparelho. Sem punição: nunca
+  // há contador que "zera" por um dia perdido.
+
+  var GAME_KEY = 'checklist-diario:game';
+  var GAME_KEEP_DAYS = 120;
+  var CELEBRATIONS = [
+    'Lista completa! 🎉', 'Mandou bem! ✨', 'Tudo feito, parabéns! 🙌', 'Missão cumprida! 🚀',
+    'Que capricho! 🌟', 'Uma a menos na cabeça! 😌', 'Arrasou! 💪', 'Feito é melhor que perfeito! 👏'
+  ];
+  var justCheckedItemId = null;
+  var game = loadGame();
+
+  function loadGame() {
+    var g = null;
+    try { g = JSON.parse(localStorage.getItem(GAME_KEY) || 'null'); } catch (e) { g = null; }
+    if (!g || typeof g !== 'object') g = {};
+    if (!g.days || typeof g.days !== 'object') g.days = {};
+    if (g.enabled === undefined) g.enabled = true;
+    return g;
+  }
+
+  function saveGame() {
+    var cutoff = dayKey(daysAgo(GAME_KEEP_DAYS));
+    Object.keys(game.days).forEach(function (k) { if (k < cutoff) delete game.days[k]; });
+    try { localStorage.setItem(GAME_KEY, JSON.stringify(game)); } catch (e) {}
+  }
+
+  function daysAgo(n) {
+    var d = new Date();
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate() - n);
+  }
+
+  function dayKey(d) {
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  }
+
+  function recordCheck(delta) {
+    var k = todayStr();
+    var n = Math.max(0, (game.days[k] || 0) + delta);
+    if (n) game.days[k] = n; else delete game.days[k];
+    saveGame();
+  }
+
+  function activeDaysLast7() {
+    var n = 0;
+    for (var i = 0; i < 7; i++) if (game.days[dayKey(daysAgo(i))]) n++;
+    return n;
+  }
+
+  // Sequência com perdão: um dia sem atividade não quebra a sequência, desde
+  // que não tenha havido outro perdão nos 6 dias anteriores. Hoje ainda não
+  // acabou, então não conta contra você.
+  function currentStreak() {
+    var n = 0;
+    var lastForgive = -100;
+    var start = game.days[dayKey(daysAgo(0))] ? 0 : 1;
+    for (var i = start; i <= GAME_KEEP_DAYS; i++) {
+      if (game.days[dayKey(daysAgo(i))]) { n++; continue; }
+      if (i - lastForgive >= 7) { lastForgive = i; continue; }
+      break;
+    }
+    return n;
+  }
+
+  function vibrate(pattern) {
+    try { if (navigator.vibrate) navigator.vibrate(pattern); } catch (e) {}
+  }
+
+  var toastTimer = null;
+  function showToast(text) {
+    var el = document.getElementById('game-toast');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'game-toast';
+      el.className = 'game-toast';
+      el.setAttribute('role', 'status');
+      el.setAttribute('aria-live', 'polite');
+      document.body.appendChild(el);
+    }
+    el.textContent = text;
+    el.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { el.classList.remove('show'); }, 2200);
+  }
+
+  // Chamado depois que um item é marcado ou desmarcado numa lista.
+  function onItemToggled(list, item) {
+    if (!game.enabled) return;
+    if (!item.done) { recordCheck(-1); return; }
+    var firstOfDay = !game.days[todayStr()];
+    recordCheck(1);
+    justCheckedItemId = item.id;
+    var complete = list.items.length > 0 && list.items.every(function (i) { return i.done; });
+    if (complete) {
+      vibrate([20, 40, 20]);
+      showToast(CELEBRATIONS[Math.floor(Math.random() * CELEBRATIONS.length)]);
+    } else {
+      vibrate(12);
+      if (firstOfDay) showToast('Primeiro do dia! 🌱');
+    }
+  }
+
+  function renderDetailProgress(list) {
+    var box = document.getElementById('detail-progress');
+    var total = list.items.length;
+    if (!game.enabled || total === 0) { box.classList.add('hidden'); box.innerHTML = ''; return; }
+    var done = list.items.filter(function (i) { return i.done; }).length;
+    var left = total - done;
+    var label = left === 0 ? 'Tudo feito! 🎉' : (left === 1 ? 'Falta só 1' : 'Faltam ' + left);
+    box.classList.remove('hidden');
+    box.innerHTML =
+      '<div class="detail-progress-label"><span>' + label + '</span><span>' + done + '/' + total + '</span></div>' +
+      '<div class="progress-bar big"><div style="width:' + Math.round((done / total) * 100) + '%"></div></div>';
+  }
+
+  function renderGameSummary() {
+    var box = document.getElementById('game-summary');
+    if (!game.enabled || state.lists.length === 0) { box.classList.add('hidden'); box.innerHTML = ''; return; }
+    var week = activeDaysLast7();
+    var streak = currentStreak();
+    var text = week === 0
+      ? '🌱 Marque um item para começar'
+      : '🌱 ' + week + (week === 1 ? ' dia ativo' : ' dias ativos') + ' nos últimos 7' +
+        (streak >= 2 ? ' · sequência de ' + streak : '');
+    box.classList.remove('hidden');
+    box.innerHTML = '<button id="btn-game-history" class="game-summary-btn">' + text + '<span aria-hidden="true">›</span></button>';
+    document.getElementById('btn-game-history').addEventListener('click', openGameHistory);
+  }
+
+  function openGameHistory() {
+    var WEEKS = 12;
+    var today = daysAgo(0);
+    var start = daysAgo(WEEKS * 7 - 7 + today.getDay()); // começa num domingo
+    var cells = '';
+    for (var i = 0; i < WEEKS * 7; i++) {
+      var d = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i);
+      if (d > today) { cells += '<span class="heat-cell future"></span>'; continue; }
+      var c = game.days[dayKey(d)] || 0;
+      var lvl = c === 0 ? 0 : (c <= 2 ? 1 : (c <= 5 ? 2 : 3));
+      cells += '<span class="heat-cell l' + lvl + '" title="' + dayKey(d) + ': ' + c + '"></span>';
+    }
+    var total = Object.keys(game.days).length;
+    openModal(
+      '<h2>Seu histórico</h2>' +
+      '<div class="heatmap" aria-label="Dias com atividade nas últimas 12 semanas">' + cells + '</div>' +
+      '<p class="hint" style="margin:0;">' + total + (total === 1 ? ' dia ativo' : ' dias ativos') +
+        ' · sequência atual: ' + currentStreak() + '</p>' +
+      '<p class="hint" style="margin:0;">Um dia sem marcar nada não zera a sequência (você tem um perdão a cada 7 dias). ' +
+        'Cada quadradinho é um dia; quanto mais escuro, mais itens feitos.</p>' +
+      '<button id="m-cancel" class="btn btn-secondary">Fechar</button>'
+    );
+    document.getElementById('m-cancel').addEventListener('click', closeModal);
+  }
+
   // ---------- navegação ----------
 
   var screenHome = document.getElementById('screen-home');
@@ -534,6 +690,7 @@
   }
 
   function renderHome() {
+    renderGameSummary();
     var container = document.getElementById('lists-container');
     container.innerHTML = '';
 
@@ -625,6 +782,7 @@
     if (list.role === 'viewer') hint = 'Você só pode ver esta lista (dono: ' + (list.ownerName || '?') + ').';
     else if (list.role === 'editor') hint = 'Você é editor: pode mexer nos itens. Dono: ' + (list.ownerName || '?') + '.';
     document.getElementById('detail-hint').textContent = hint;
+    renderDetailProgress(list);
     document.getElementById('add-item-form').classList.toggle('hidden', !editable);
     if (!editable) hideAddSuggestion();
 
@@ -667,7 +825,7 @@
 
     visibleItems.forEach(function (item) {
       var row = document.createElement('li');
-      row.className = 'item-row' + (item.done ? ' done' : '');
+      row.className = 'item-row' + (item.done ? ' done' : '') + (item.id === justCheckedItemId ? ' just-done' : '');
       row.innerHTML =
         '<div class="check">' + (item.done ? '✓' : '') + '</div>' +
         '<textarea class="text" rows="1" readonly></textarea>' +
@@ -687,7 +845,10 @@
       row.querySelector('.check').addEventListener('click', function () {
         item.done = !item.done;
         save();
+        justCheckedItemId = null;
+        onItemToggled(list, item);
         renderDetail();
+        justCheckedItemId = null;
       });
 
       textEl.addEventListener('input', function () { autoGrow(textEl); });
@@ -1252,6 +1413,8 @@
       '<div class="settings-row"><span>Importar backup (.json)</span><button id="m-import" class="btn btn-secondary" style="flex:none;">Importar</button></div>' +
       '<input id="m-import-file" type="file" accept="application/json" class="hidden" style="display:none;">' +
       '<div class="settings-row"><span>Verificar atualização do app</span><button id="m-check-update" class="btn btn-secondary" style="flex:none;">Verificar</button></div>' +
+      '<div class="settings-row"><span>Progresso e feedback ao marcar</span><button id="m-game-toggle" class="btn btn-secondary" style="flex:none;">' +
+        (game.enabled ? 'Desativar' : 'Ativar') + '</button></div>' +
       '<div class="settings-row"><span>Sugestão de categoria</span><button id="m-reset-learning" class="btn btn-secondary" style="flex:none;">Resetar aprendizado</button></div>' +
       '<div class="settings-row"><span>Bloqueio do app (Face ID/Touch ID)</span><button id="m-app-lock" class="btn btn-secondary" style="flex:none;">' +
         (isAppLockEnabled() ? 'Desativar' : 'Ativar') + '</button></div>' +
@@ -1281,6 +1444,13 @@
       enableAppLock().then(function (ok) {
         if (ok) { alert('Bloqueio ativado.'); closeModal(); }
       });
+    });
+
+    document.getElementById('m-game-toggle').addEventListener('click', function () {
+      game.enabled = !game.enabled;
+      saveGame();
+      closeModal();
+      if (currentListId) renderDetail(); else renderHome();
     });
 
     document.getElementById('m-reset-learning').addEventListener('click', function () {
