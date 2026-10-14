@@ -103,7 +103,7 @@ O ícone (`icons/`) é gerado por `node gen-icons.js`, sem dependências: círcu
 ## Estrutura do código
 
 - `index.html`, `styles.css`, `app.js` (a interface e o estado), `service-worker.js`.
-- `pure.js`: funções puras (interpretar "amanhã 10h", achar links, juntar progresso, datas), sem DOM nem estado. Carrega antes do `app.js`, roda também em Node e tem testes unitários rápidos (`tests/13-puras.test.js`). Novas funções sem efeito colateral devem nascer aqui. Um `index.html` antigo em cache (sem a tag do `pure.js`) continua funcionando: o `app.js` lê o arquivo sozinho.
+- `pure.js`: funções puras (interpretar "amanhã 10h", achar links, juntar progresso, sequência com perdão, semana da revisão, rotina por dias, adiar, quem concluiu cada item, ritmo), sem DOM nem estado. Carrega antes do `app.js`, roda também em Node e tem testes unitários rápidos (`tests/13-puras.test.js`). Novas funções sem efeito colateral devem nascer aqui. Um `index.html` antigo em cache (sem a tag do `pure.js`) continua funcionando: o `app.js` lê o arquivo sozinho.
 
 ## Testes
 
