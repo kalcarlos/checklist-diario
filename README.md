@@ -64,6 +64,11 @@ O lembrete diário de cada lista é por pessoa: numa lista compartilhada, cada u
 
 ## Outros recursos
 
+- **Desfazer**: ao excluir um item ou uma lista (sem compartilhamento), limpar concluídos ou marcar/desmarcar todos, aparece um aviso "Desfazer" por 6 segundos que devolve tudo no lugar de origem. Listas compartilhadas continuam pedindo confirmação, porque a exclusão no servidor não volta.
+- **Primeira abertura guiada**: só em instalação nova (3 passos: boas-vindas, perfil de uso e modelos). Os perfis ("preciso de ajuda para focar", "ritmo mais tranquilo", "só o básico") apenas ligam ou desligam opções que já existem em Ajustes; dá pra trocar depois em Ajustes → Perfil de uso.
+- **Modelos de lista** (manhã, noite, casa em 15 minutos, mercado, mala de viagem, contas) na tela Nova lista, e **Duplicar lista** no menu da lista.
+- **Recompensa pessoal** (menu da lista → Recompensa ao concluir): ao terminar a lista aparece o combinado ("☕ Um café"), uma vez por dia por lista. Fica só neste aparelho.
+
 - **Busca** (🔍 na home): procura um texto em todos os itens de todas as listas.
 - **Ordenar por** (menu ⋯ da lista): manual (arrastar), alfabética, ou pendentes primeiro. Arrastar só funciona no modo manual.
 - **Vários horários de lembrete** por lista, e o lembrete não dispara se a lista já estiver toda feita.
@@ -81,3 +86,16 @@ O visual segue um design system próprio, todo em `styles.css`: tokens de cor (c
 A paleta foi pensada para ser calma (útil para ansiedade e TDAH): fundo "papel" quente no claro e azul-noite no escuro (sem branco nem preto puros, para cansar menos a vista), **índigo** como cor de ação, **verde-sálvia** só para "feito" (sempre acompanhado do ✓ e do texto riscado, nunca só a cor), **coral fechado** apenas em ações destrutivas e **âmbar suave** para incentivo. Nada pisca nem usa vermelho de alerta para "atraso". Cada lista ganha um tom próprio no ícone, derivado do id, para ser reconhecida de relance. A barra de progresso é índigo enquanto avança e vira verde ao concluir. Todos os pares de texto e fundo passam no contraste WCAG AA (4,5:1).
 
 O ícone (`icons/`) é gerado por `node gen-icons.js`, sem dependências: círculo claro com check sobre degradê índigo, o mesmo símbolo de "feito" da interface. Há versões normal (cantos arredondados), opaca para o iPhone (`apple-touch-icon`, o iOS arredonda sozinho) e *maskable* para Android. As URLs levam `?v=2`; ao trocar o desenho, aumente esse número em `index.html` e `manifest.json`. **No iPhone o ícone da Tela de Início só muda se o app for removido e adicionado de novo** (exporte um backup antes ou entre numa conta, porque os dados locais ficam no app instalado).
+
+## Testes
+
+Testes de ponta a ponta com Playwright (Chromium), cobrindo fluxos, layout em várias larguras, temas, contraste WCAG e o caso do `index.html` antigo em cache. O runner sobe o servidor sozinho.
+
+```
+npm ci
+npx playwright install chromium    # uma vez
+npm test                           # resume por suíte (VERBOSE=1 mostra cada verificação)
+npm test -- lote1                  # só as suítes cujo nome contém "lote1"
+```
+
+Com um Chromium já instalado, use `PW_CHROMIUM=/caminho/do/chromium npm test`. O GitHub Actions (`.github/workflows/tests.yml`) roda tudo em cada pull request e push na `main`.

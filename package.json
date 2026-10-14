@@ -1,0 +1,14 @@
+{
+  "name": "checklist-diario",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Checklist diário (PWA). Este package.json existe só para rodar os testes e gerar os ícones.",
+  "scripts": {
+    "test": "node tests/run.js",
+    "serve": "node serve.js",
+    "icons": "node gen-icons.js"
+  },
+  "devDependencies": {
+    "playwright": "1.56.1"
+  }
+}

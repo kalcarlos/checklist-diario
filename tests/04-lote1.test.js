@@ -1,0 +1,160 @@
+const path = require('path');
+const { launchBrowser, URL } = require('./lib');
+let pass=0,fail=0;
+const ok=(n,c,x)=>{ if(c){pass++;console.log('  ok  ',n);}else{fail++;console.log('  FAIL',n,x===undefined?'':JSON.stringify(x));} };
+const dk=n=>{const d=new Date();const x=new Date(d.getFullYear(),d.getMonth(),d.getDate()-n);return x.getFullYear()+'-'+String(x.getMonth()+1).padStart(2,'0')+'-'+String(x.getDate()).padStart(2,'0');};
+(async()=>{
+ const b=await launchBrowser();
+ const mkList=(id,name,type,items,done,extra)=>Object.assign({id,name,emoji:'🏠',type,items:items.map((t,i)=>({id:id+i,text:t,done:i<(done||0)})),sortOrder:'manual',reminder:{enabled:false,times:[]}},extra||{});
+ const mkState=l=>({lastResetDate:dk(0),wordListStats:{},trash:[],lists:l});
+ const G=x=>Object.assign({enabled:true,days:{},badges:{},total:0,listsDone:0,greetedOn:dk(0),onboarded:true},x||{});
+ async function fresh(o){const c=await b.newContext(Object.assign({viewport:{width:390,height:844},serviceWorkers:'block'},o||{}));const p=await c.newPage();p.errs=[];p.on('pageerror',e=>p.errs.push(e.message));return p;}
+ async function boot(p,state,game){await p.goto(URL);await p.evaluate(([s,g])=>{localStorage.setItem('checklist-diario:v1',JSON.stringify(s));localStorage.setItem('checklist-diario:skipLogin','1');localStorage.setItem('checklist-diario:game',JSON.stringify(g));},[state,game||G()]);await p.reload();await p.waitForTimeout(400);await p.evaluate(()=>document.getElementById('modal-backdrop').classList.add('hidden'));}
+ const hidden=p=>p.$eval('#modal-backdrop',e=>e.classList.contains('hidden'));
+ const items=p=>p.$$eval('.item-row .text',e=>e.map(x=>x.value));
+ const stored=(p,k)=>p.evaluate(k=>JSON.parse(localStorage.getItem(k)),k);
+
+ console.log('1. Desfazer');
+ let p=await fresh(); await p.clock.install(); await boot(p,mkState([mkList('c','Casa','rotina',['a','b','c','d'])]));
+ await p.click('.list-card'); await p.waitForTimeout(500);
+ await p.click('.item-row:nth-child(2) .delete'); await p.waitForTimeout(80);
+ ok('item sai da lista e aparece "Item excluído"',JSON.stringify(await items(p))===JSON.stringify(['a','c','d'])&&/Item excluído/.test(await p.textContent('#undo-toast')),await items(p));
+ await p.click('#undo-toast .undo-btn'); await p.waitForTimeout(80);
+ ok('desfazer devolve o item na mesma posição',JSON.stringify(await items(p))===JSON.stringify(['a','b','c','d']),await items(p));
+ ok('desfazer remove a entrada da lixeira',(await stored(p,'checklist-diario:v1')).trash.length===0);
+ ok('aviso some depois de desfazer',await p.$eval('#undo-toast',e=>!e.classList.contains('show')));
+ await p.click('.item-row:nth-child(1) .delete'); await p.clock.runFor(6200); await p.waitForTimeout(50);
+ ok('aviso some sozinho em ~6s',await p.$eval('#undo-toast',e=>!e.classList.contains('show')));
+ ok('sem desfazer, o item continua na lixeira (7 dias)',(await stored(p,'checklist-diario:v1')).trash.length===1);
+ // limpar concluídos
+ p=await fresh(); await boot(p,mkState([mkList('c','Casa','lista',['a','b','c','d'],0)]));
+ await p.evaluate(()=>{const s=JSON.parse(localStorage.getItem('checklist-diario:v1'));s.lists[0].items[1].done=true;s.lists[0].items[3].done=true;localStorage.setItem('checklist-diario:v1',JSON.stringify(s));}); await p.reload(); await p.waitForTimeout(400); await p.evaluate(()=>document.getElementById('modal-backdrop').classList.add('hidden'));
+ await p.click('.list-card'); await p.click('#btn-list-menu'); await p.click('#m-clear'); await p.waitForTimeout(100);
+ ok('limpar concluídos remove 2 e avisa a quantidade',JSON.stringify(await items(p))===JSON.stringify(['a','c'])&&/2 itens/.test(await p.textContent('#undo-toast')),await items(p));
+ await p.click('#undo-toast .undo-btn'); await p.waitForTimeout(100);
+ ok('desfazer restaura os 2 nas posições originais',JSON.stringify(await items(p))===JSON.stringify(['a','b','c','d']),await items(p));
+ ok('e continuam marcados',(await p.$$('.item-row.done')).length===2);
+ // marcar todos
+ await p.click('#btn-list-menu'); await p.click('#m-check-all'); await p.waitForTimeout(100);
+ ok('marcar todos marca tudo',(await p.$$('.item-row.done')).length===4);
+ await p.click('#undo-toast .undo-btn'); await p.waitForTimeout(100);
+ ok('desfazer volta ao estado anterior (2 marcados, b e d)',(await p.$$eval('.item-row.done .text',e=>e.map(x=>x.value))).join()==='b,d');
+ await p.click('#btn-list-menu'); await p.click('#m-uncheck-all'); await p.waitForTimeout(100);
+ await p.click('#undo-toast .undo-btn'); await p.waitForTimeout(100);
+ ok('desmarcar todos também desfaz',(await p.$$('.item-row.done')).length===2);
+ // listas
+ p=await fresh(); await boot(p,mkState([mkList('a','Primeira','lista',['x']),mkList('b','Segunda','lista',['y']),mkList('c','Terceira','lista',['z'])]));
+ let dialog=false; p.on('dialog',d=>{dialog=true;d.dismiss();});
+ await p.click('.list-card:nth-child(2) .delete'); await p.waitForTimeout(120);
+ ok('excluir lista local: sem caixa de confirmação',!dialog);
+ ok('lista some e aparece aviso',(await p.$$('.list-card')).length===2&&/Segunda/.test(await p.textContent('#undo-toast')));
+ await p.click('#undo-toast .undo-btn'); await p.waitForTimeout(120);
+ ok('desfazer devolve a lista na mesma posição',JSON.stringify(await p.$$eval('.list-card .name',e=>e.map(x=>x.value)))===JSON.stringify(['Primeira','Segunda','Terceira']));
+ ok('lixeira vazia após desfazer',(await stored(p,'checklist-diario:v1')).trash.length===0);
+ await p.click('.list-card:nth-child(1)'); await p.waitForTimeout(450); await p.click('#btn-list-menu'); await p.click('#m-delete'); await p.waitForTimeout(150);
+ ok('excluir pelo menu: sem confirmação, volta à home com aviso',!dialog&&(await p.$$('.list-card')).length===2&&(await p.$('#undo-toast.show'))!==null);
+ p=await fresh(); await boot(p,mkState([mkList('a','Compartilhada','lista',['x'],0,{role:'owner',rev:3,members:[{userId:'u2',username:'ana',role:'editor'}]})]));
+ let asked=null; p.on('dialog',d=>{asked=d.message();d.dismiss();});
+ await p.click('.list-card .delete'); await p.waitForTimeout(150);
+ ok('lista compartilhada continua pedindo confirmação',/Excluir a lista/.test(asked||'')&&(await p.$$('.list-card')).length===1,asked);
+ ok('sem erros de JS',p.errs.length===0,p.errs);
+
+ console.log('2. Primeira abertura guiada');
+ p=await fresh(); await p.goto(URL); await p.waitForTimeout(500);
+ ok('instalação nova abre as boas-vindas',/Bem-vindo/.test(await p.textContent('#modal')));
+ ok('3 pontinhos de progresso',(await p.$$('.steps span')).length===3);
+ ok('login ainda não aparece (vem depois)',!/Entrar/.test(await p.textContent('#modal')));
+ ok('saudação diária não aparece junto',(await p.$('#game-toast'))===null);
+ await p.click('#m-ob-next'); await p.waitForTimeout(100);
+ ok('passo 2 lista 3 perfis, 1º selecionado',(await p.$$('.choice-card')).length===3&&await p.$eval('.choice-card',e=>e.classList.contains('selected')));
+ await p.click('[data-profile="calmo"]');
+ ok('escolher perfil marca o cartão',await p.$eval('[data-profile="calmo"]',e=>e.classList.contains('selected')));
+ await p.click('#m-ob-back'); await p.waitForTimeout(60); ok('voltar mostra o passo 1',/Bem-vindo/.test(await p.textContent('#modal')));
+ await p.click('#m-ob-next'); await p.click('#m-ob-next'); await p.waitForTimeout(100);
+ ok('perfil escolhido é lembrado ao voltar e avançar',/modelo/.test(await p.textContent('#modal')));
+ await p.click('[data-key="manha"]'); await p.click('[data-key="mala"]'); await p.click('#m-ob-done'); await p.waitForTimeout(250);
+ let g=await stored(p,'checklist-diario:game'); let st=await stored(p,'checklist-diario:v1');
+ ok('perfil "calmo" aplicado',g.calm===true&&g.today===true&&g.enabled===true&&g.profile==='calmo',g);
+ ok('2 modelos viraram listas (4 iniciais + 2)',st.lists.length===6&&st.lists.some(l=>l.name==='Rotina da manhã'&&l.items.length===6&&l.type==='rotina')&&st.lists.some(l=>l.name==='Mala de viagem'),st.lists.map(l=>l.name));
+ ok('onboarded gravado',g.onboarded===true);
+ ok('depois do onboarding abre a tela de conta',/Conta|Entrar/.test(await p.textContent('#modal'))&&!(await hidden(p)));
+ await p.evaluate(()=>document.getElementById('modal-backdrop').classList.add('hidden'));
+ await p.reload(); await p.waitForTimeout(400);
+ ok('não repete o onboarding no próximo carregamento',!/Bem-vindo/.test(await p.textContent('#modal')));
+ p=await fresh(); await p.goto(URL); await p.waitForTimeout(400);
+ await p.mouse.click(195,60); await p.waitForTimeout(300);
+ ok('fechar tocando fora conta como pular e segue pro login',/Conta|Entrar/.test(await p.textContent('#modal'))&&(await stored(p,'checklist-diario:game')).onboarded===true);
+ p=await fresh(); await p.goto(URL+'/?convite=ABC123'); await p.waitForTimeout(500);
+ ok('abrindo por link de convite: sem onboarding, vai direto à conta',!/Bem-vindo/.test(await p.textContent('#modal'))&&/Conta|Entrar|convite/i.test(await p.textContent('#modal')));
+ p=await fresh(); await boot(p,mkState([mkList('c','Casa','rotina',['a'])]),G({greetedOn:'2000-01-01'}));
+ ok('quem já usa o app não vê onboarding',!/Bem-vindo/.test(await p.textContent('#modal')||''));
+ await p.click('#btn-settings'); await p.click('#m-profile'); await p.waitForTimeout(100);
+ await p.click('[data-profile="basico"]'); await p.click('#m-profile-save'); await p.waitForTimeout(150);
+ g=await stored(p,'checklist-diario:game'); ok('Ajustes → Perfil de uso aplica o perfil básico',g.enabled===false&&g.today===false&&g.calm===false&&g.profile==='basico',g);
+ ok('home reflete (sem "Para agora")',(await p.$$('.today-row')).length===0);
+ const wnar=await fresh({viewport:{width:320,height:640}}); await wnar.goto(URL); await wnar.waitForTimeout(500);
+ ok('onboarding cabe em 320px sem estourar',await wnar.$eval('#modal',e=>e.scrollWidth<=e.clientWidth+1));
+
+ console.log('3. Recompensa pessoal');
+ p=await fresh(); await boot(p,mkState([mkList('c','Casa','lista',['a','b'])]));
+ await p.click('.list-card'); await p.waitForTimeout(450); await p.click('#btn-list-menu'); await p.waitForTimeout(250);
+ ok('menu da lista tem "Recompensa ao concluir" (Definir)',/Definir/.test(await p.textContent('#m-reward')));
+ await p.click('#m-reward'); await p.click('[data-idea="☕ Um café"]'); await p.waitForTimeout(60);
+ ok('sugestão preenche o campo',(await p.inputValue('#m-reward-text'))==='☕ Um café');
+ await p.click('#m-reward-save'); await p.waitForTimeout(250);
+ ok('salva e volta ao menu mostrando a recompensa',/Um café/.test(await p.textContent('#m-reward')));
+ ok('guardada só neste aparelho (estado de jogo, não da lista)',(await stored(p,'checklist-diario:game')).rewards.c==='☕ Um café'&&!JSON.stringify(await stored(p,'checklist-diario:v1')).includes('Um café'));
+ await p.click('#m-cancel'); await p.waitForTimeout(150);
+ await p.click('.item-row:nth-child(1) .check'); await p.waitForTimeout(900);
+ ok('1 de 2: sem recompensa ainda',await hidden(p));
+ await p.click('.item-row:nth-child(2) .check'); await p.waitForTimeout(1100);
+ ok('ao concluir, mostra "Lista concluída!" com a recompensa',/Lista concluída/.test(await p.textContent('#modal'))&&(await p.textContent('#reward-text'))==='☕ Um café');
+ await p.click('#m-reward-ok'); await p.waitForTimeout(150);
+ ok('"Vou aproveitar" fecha',await hidden(p));
+ await p.click('.item-row:nth-child(2) .check'); await p.click('.item-row:nth-child(2) .check'); await p.waitForTimeout(1200);
+ ok('concluir de novo no mesmo dia não repete',await hidden(p));
+ // via modo foco
+ p=await fresh(); await boot(p,mkState([mkList('c','Casa','lista',['só uma'])]),G({rewards:{c:'🎵 Uma música'}}));
+ await p.click('.list-card'); await p.click('#btn-focus'); await p.click('#m-focus-done'); await p.waitForTimeout(1300);
+ ok('pelo modo foco: a recompensa aparece depois do foco fechar',/Lista concluída/.test(await p.textContent('#modal'))&&(await p.textContent('#reward-text'))==='🎵 Uma música');
+ // pelo "Para agora"
+ p=await fresh(); await boot(p,mkState([mkList('c','Casa','rotina',['única'])]),G({rewards:{c:'🍫 Doce'}}));
+ await p.click('.today-row .check'); await p.waitForTimeout(1300);
+ ok('pelo "Para agora" também',/Lista concluída/.test(await p.textContent('#modal')));
+ // escape
+ p=await fresh(); await boot(p,mkState([mkList('c','Casa','rotina',['única'])]),G({rewards:{c:'<img id=pwn src=x>'}}));
+ await p.click('.today-row .check'); await p.waitForTimeout(1300);
+ ok('texto da recompensa é escapado',(await p.$('#pwn'))===null&&(await p.textContent('#reward-text')).startsWith('<img'));
+ // remover
+ p=await fresh(); await boot(p,mkState([mkList('c','Casa','lista',['a'])]),G({rewards:{c:'X'}}));
+ await p.click('.list-card'); await p.click('#btn-list-menu'); await p.click('#m-reward'); await p.click('#m-reward-remove'); await p.waitForTimeout(200);
+ ok('remover recompensa',!('c' in (await stored(p,'checklist-diario:game')).rewards)&&/Definir/.test(await p.textContent('#m-reward')));
+ p=await fresh(); await boot(p,mkState([mkList('c','Casa','lista',['a'])]),G({enabled:false,rewards:{c:'X'}}));
+ await p.click('.list-card'); await p.click('.item-row .check'); await p.waitForTimeout(1200);
+ ok('com feedback desligado nos Ajustes, não mostra recompensa',await hidden(p));
+
+ console.log('4. Modelos e duplicar');
+ p=await fresh(); await boot(p,mkState([mkList('c','Casa','lista',['a'])]));
+ await p.click('#btn-new-list'); await p.waitForTimeout(250);
+ ok('Nova lista oferece 6 modelos',(await p.$$('#m-templates .chip')).length===6);
+ await p.click('#m-templates [data-key="noite"]'); await p.waitForTimeout(60);
+ ok('modelo preenche nome, ícone e tipo (rotina)',(await p.inputValue('#m-name'))==='Rotina da noite'&&await p.$eval('.type-choice[data-type="rotina"]',e=>e.classList.contains('selected'))&&await p.$eval('.emoji-choice.selected',e=>e.textContent==='🌙'));
+ ok('avisa quantos itens vêm prontos',/6 itens/.test(await p.textContent('#m-template-note')));
+ await p.fill('#m-name','Minha noite'); await p.click('#m-create'); await p.waitForTimeout(200);
+ const created=(await stored(p,'checklist-diario:v1')).lists.find(l=>l.name==='Minha noite');
+ ok('cria com os itens do modelo e o nome editado',created&&created.items.length===6&&created.type==='rotina'&&created.emoji==='🌙'&&created.items.every(i=>i.done===false&&i.id),created&&created.items.length);
+ await p.click('#btn-new-list'); await p.click('#m-templates [data-key="mercado"]'); await p.click('#m-templates [data-key="mercado"]'); await p.waitForTimeout(60);
+ ok('tocar de novo desmarca o modelo',(await p.$$('#m-templates .chip.selected')).length===0&&await p.$eval('#m-template-note',e=>e.classList.contains('hidden')));
+ await p.fill('#m-name','Vazia'); await p.click('#m-create'); await p.waitForTimeout(150);
+ ok('sem modelo, a lista nasce vazia',(await stored(p,'checklist-diario:v1')).lists.find(l=>l.name==='Vazia').items.length===0);
+ // duplicar
+ p=await fresh(); await boot(p,mkState([mkList('c','Casa','rotina',['a','b','c'],2,{sortOrder:'alpha'})]));
+ await p.click('.list-card'); await p.click('#btn-list-menu'); await p.click('#m-duplicate'); await p.waitForTimeout(250);
+ const lists=(await stored(p,'checklist-diario:v1')).lists;
+ ok('duplicar cria "Casa (cópia)" e volta à home',lists.length===2&&lists[1].name==='Casa (cópia)'&&(await p.$$('.list-card')).length===2);
+ ok('cópia: mesmos itens, todos desmarcados, ids novos, mesmo tipo e ordenação',lists[1].items.map(i=>i.text).join()==='a,b,c'&&lists[1].items.every(i=>!i.done)&&lists[1].items.every((i,k)=>i.id!==lists[0].items[k].id)&&lists[1].type==='rotina'&&lists[1].sortOrder==='alpha');
+ ok('original intacto',lists[0].items.filter(i=>i.done).length===2&&lists[0].name==='Casa');
+ ok('aviso de lista duplicada',/duplicada/.test(await p.textContent('#game-toast')));
+ ok('sem erros de JS',p.errs.length===0,p.errs);
+ await b.close(); console.log(`\n${pass} ok, ${fail} falhas`); process.exit(fail?1:0);
+})();
