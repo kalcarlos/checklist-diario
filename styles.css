@@ -634,3 +634,47 @@ body {
   font-family: inherit;
   resize: vertical;
 }
+
+/* próximas tarefas, timer e respiração */
+.today-box.hidden { display: none; }
+.today-box { padding: 0 16px 8px; display: flex; flex-direction: column; gap: 6px; }
+.today-title { font-size: 13px; font-weight: 700; color: var(--text-dim); text-transform: uppercase; letter-spacing: .5px; }
+.today-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+.today-row .check {
+  width: 22px; height: 22px; border-radius: 50%;
+  border: 2px solid var(--text-dim); flex-shrink: 0; cursor: pointer;
+}
+.today-text { flex: 1; font-size: 15px; overflow-wrap: anywhere; }
+.today-emoji { font-size: 16px; }
+.breathe-btn {
+  align-self: flex-start;
+  background: none; border: none; color: var(--text-dim);
+  font-size: 13px; padding: 4px 2px; cursor: pointer;
+}
+
+.focus-timer { display: flex; align-items: center; justify-content: center; gap: 8px; flex-wrap: wrap; min-height: 36px; }
+.focus-timer .small-btn { padding: 6px 10px; font-size: 13px; }
+.timer-track { flex: 1; min-width: 80px; height: 6px; background: var(--card-2); border-radius: 3px; overflow: hidden; }
+#focus-timer-bar { height: 100%; width: 0; background: var(--accent); transition: width 1s linear; }
+
+.breath-circle {
+  width: 150px; height: 150px; border-radius: 50%; margin: 18px auto;
+  background: color-mix(in srgb, var(--accent) 35%, var(--card-2));
+  transform: scale(.6);
+  transition-property: transform;
+  transition-timing-function: ease-in-out;
+}
+.breath-circle.in { transform: scale(1); }
+
+@media (prefers-reduced-motion: reduce) {
+  .breath-circle, .breath-circle.in { transition: none; transform: scale(.85); }
+  #focus-timer-bar { transition: none; }
+}
