@@ -605,12 +605,15 @@
     if (!g.rewards || typeof g.rewards !== 'object') g.rewards = {};
     if (!g.rewardShown || typeof g.rewardShown !== 'object') g.rewardShown = {};
     if (!g.sound || typeof g.sound !== 'object') g.sound = { on: false, kind: 'chuva', vol: 50 };
+    if (!g.doneLists || typeof g.doneLists !== 'object') g.doneLists = {};
+    if (!g.reviews || typeof g.reviews !== 'object') g.reviews = {};
     return g;
   }
 
   function saveGame() {
     var cutoff = dayKey(daysAgo(GAME_KEEP_DAYS));
     Object.keys(game.days).forEach(function (k) { if (k < cutoff) delete game.days[k]; });
+    Object.keys(game.doneLists || {}).forEach(function (k) { if (k < cutoff) delete game.doneLists[k]; });
     try { localStorage.setItem(GAME_KEY, JSON.stringify(game)); } catch (e) {}
   }
 
@@ -691,7 +694,7 @@
     justCheckedItemId = item.id;
     var actv = activeItems(list);
     var complete = actv.length > 0 && actv.every(function (i) { return i.done; });
-    if (complete) game.listsDone++;
+    if (complete) { game.listsDone++; game.doneLists[todayStr()] = (game.doneLists[todayStr()] || 0) + 1; }
     if (complete && game.rewards[list.id] && game.rewardShown[list.id] !== todayStr()) {
       setTimeout(function () { showReward(list, 0); }, 700);
     }
@@ -775,6 +778,7 @@
               return '<li class="focus-step' + (st.done ? ' done' : '') + '" data-idx="' + k + '"><span class="step-check">' + (st.done ? ICONS.check : '') + '</span><span class="step-text"></span></li>';
             }).join('') + '</ul>'
           : '') +
+        (item.note ? '<div class="focus-note"><div class="focus-note-text"></div><div class="note-links"></div></div>' : '') +
         '<div id="focus-timer" class="focus-timer"></div>' +
         '<button id="m-focus-done" class="btn btn-primary">Feito ✓</button>' +
         '<div class="focus-actions">' +
@@ -786,6 +790,11 @@
         '</div>'
       );
       document.getElementById('focus-text').textContent = item.text;
+      var fnote = modal.querySelector('.focus-note');
+      if (fnote) {
+        fnote.querySelector('.focus-note-text').textContent = item.note;
+        renderLinkChips(fnote.querySelector('.note-links'), findLinks(item.note));
+      }
       modal.querySelectorAll('.focus-step').forEach(function (li) {
         var st = item.steps[parseInt(li.getAttribute('data-idx'), 10)];
         li.querySelector('.step-text').textContent = st.text;
@@ -1385,6 +1394,188 @@
     });
   }
 
+  // ---------- notas e links por item ----------
+
+  // Acha links úteis num texto: sites, e-mails e telefones (formatos brasileiros
+  // com DDD entre parênteses, +55 ou 8/9 dígitos com hífen; números soltos não).
+  function findLinks(text) {
+    var out = [], seen = {};
+    var t = String(text || '');
+    function add(type, href, label) { if (!seen[href]) { seen[href] = 1; out.push({ type: type, href: href, label: label }); } }
+    t.replace(/(?:https?:\/\/|www\.)[^\s<>"']+/gi, function (m) {
+      var clean = m.replace(/[.,;:!?)\]]+$/, '');
+      var href = /^https?:/i.test(clean) ? clean : 'https://' + clean;
+      var host = clean.replace(/^https?:\/\//i, '').replace(/^www\./i, '').split(/[\/?#]/)[0];
+      add('url', href, host);
+      return m;
+    });
+    t.replace(/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g, function (m) { add('mail', 'mailto:' + m, m); return m; });
+    t.replace(/(?:\+55\s?)?\(\d{2}\)\s?9?\d{4}[-\s]?\d{4}|\+55\s?\d{2}\s?9?\d{4}[-\s]?\d{4}|\b9?\d{4}-\d{4}\b/g, function (m) {
+      add('tel', 'tel:' + m.replace(/[^\d+]/g, ''), m.trim());
+      return m;
+    });
+    return out;
+  }
+
+  var LINK_ICONS = { url: '🔗', mail: '✉️', tel: '📞' };
+
+  function renderLinkChips(box, links) {
+    box.innerHTML = '';
+    links.forEach(function (l) {
+      var a = document.createElement('a');
+      a.className = 'link-chip';
+      a.href = l.href;
+      if (l.type === 'url') { a.target = '_blank'; a.rel = 'noopener noreferrer'; }
+      a.textContent = LINK_ICONS[l.type] + ' ' + l.label;
+      box.appendChild(a);
+    });
+  }
+
+  function setNote(item, value) {
+    var v = String(value || '').trim().slice(0, 500);
+    if (v) item.note = v; else delete item.note;
+    save();
+  }
+
+  // ---------- revisão semanal gentil ----------
+
+  var DOW_LETTER = ['D', 'S', 'T', 'Q', 'Q', 'S', 'S'];
+  var DOW_LONG = ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado'];
+
+  // Semana de segunda a domingo. Na segunda-feira mostra a semana anterior inteira
+  // (a nova mal começou); nos outros dias, a semana em andamento.
+  function reviewWeek() {
+    var dow = (new Date().getDay() + 6) % 7; // segunda = 0
+    var back = dow === 0 ? 7 : dow;
+    var days = [];
+    for (var i = 0; i < 7; i++) {
+      var d = daysAgo(back - i);
+      var k = dayKey(d);
+      days.push({ key: k, dow: d.getDay(), count: game.days[k] || 0, lists: game.doneLists[k] || 0, future: k > todayStr(), today: k === todayStr() });
+    }
+    return { key: days[0].key, days: days, from: daysAgo(back), to: daysAgo(back - 6) };
+  }
+
+  function weekStats(w) {
+    var total = 0, lists = 0, active = 0, best = null;
+    w.days.forEach(function (d) {
+      total += d.count; lists += d.lists;
+      if (d.count > 0) active++;
+      if (d.count > 0 && (!best || d.count > best.count)) best = d;
+    });
+    var first = w.days[0].key, last = w.days[6].key;
+    var badges = BADGES.filter(function (b) { var at = game.badges[b.id]; return at && at >= first && at <= last; });
+    return { total: total, lists: lists, active: active, best: best, badges: badges };
+  }
+
+  function weeklyCardWanted() {
+    if (!game.enabled) return null;
+    var dow = new Date().getDay();
+    if (dow !== 0 && dow !== 1) return null; // domingo e segunda
+    if (game.reviewHideDay === todayStr()) return null;
+    var w = reviewWeek();
+    var r = game.reviews[w.key];
+    if (r && r.seen) return null;
+    var st = weekStats(w);
+    if (st.total === 0 && st.lists === 0) return null; // sem nada a mostrar, sem cobrança
+    return w;
+  }
+
+  function renderWeeklyCard() {
+    var box = ensureBox('weekly-card', 'weekly-card', 'today-box');
+    var w = weeklyCardWanted();
+    if (!w) { box.classList.add('hidden'); box.innerHTML = ''; return; }
+    box.classList.remove('hidden');
+    box.innerHTML =
+      '<div class="weekly-text"><strong>📋 Sua semana está pronta</strong><span>Um olhar gentil sobre o que você fez.</span></div>' +
+      '<button id="btn-weekly-open" class="btn btn-primary small-btn" type="button">Ver</button>' +
+      '<button id="btn-weekly-hide" class="weekly-x" type="button" aria-label="Agora não">×</button>';
+    document.getElementById('btn-weekly-open').addEventListener('click', openWeeklyReview);
+    document.getElementById('btn-weekly-hide').addEventListener('click', function () {
+      game.reviewHideDay = todayStr();
+      saveGame();
+      renderWeeklyCard();
+    });
+  }
+
+  function fmtDay(d) { return d.getDate() + '/' + String(d.getMonth() + 1).padStart(2, '0'); }
+
+  function openWeeklyReview() {
+    var w = reviewWeek();
+    var st = weekStats(w);
+    var mine = game.reviews[w.key] || {};
+    game.reviews[w.key] = { helped: mine.helped || '', next: mine.next || '', at: mine.at || todayStr(), seen: true };
+    saveGame();
+    renderWeeklyCard();
+
+    var max = Math.max.apply(null, w.days.map(function (d) { return d.count; }).concat([1]));
+    var cols = w.days.map(function (d) {
+      var h = d.count > 0 ? Math.max(12, Math.round((d.count / max) * 100)) : 0;
+      return '<div class="wk-col' + (d.today ? ' today' : '') + (d.future ? ' future' : '') + '">' +
+        (game.calm || d.count === 0 ? '<span class="wk-val">&nbsp;</span>' : '<span class="wk-val">' + d.count + '</span>') +
+        '<div class="wk-track">' + (h ? '<div class="wk-bar" style="height:' + h + '%"></div>' : '<div class="wk-dot"></div>') + '</div>' +
+        '<span class="wk-label">' + DOW_LETTER[d.dow] + '</span></div>';
+    }).join('');
+
+    var sentence;
+    if (st.total === 0 && st.lists === 0) {
+      sentence = 'Foi uma semana mais quieta. Tudo bem: recomeçar também faz parte do caminho.';
+    } else if (game.calm) {
+      sentence = 'Você apareceu por aqui e fez o que deu. Isso conta.';
+    } else {
+      sentence = 'Você marcou ' + st.total + (st.total === 1 ? ' coisa' : ' coisas') + ' em ' + st.active + (st.active === 1 ? ' dia' : ' dias') + '.' +
+        (st.best && st.active > 1 ? ' Seu dia mais forte foi ' + DOW_LONG[st.best.dow] + '.' : '');
+    }
+    var stats = '';
+    if (!game.calm && (st.total || st.lists)) {
+      stats = '<div class="chip-row">' +
+        '<span class="chip-mini">✅ ' + st.total + ' marcadas</span>' +
+        (st.lists ? '<span class="chip-mini">🎯 ' + st.lists + (st.lists === 1 ? ' lista concluída' : ' listas concluídas') + '</span>' : '') +
+        '<span class="chip-mini">📅 ' + st.active + (st.active === 1 ? ' dia ativo' : ' dias ativos') + '</span></div>';
+    }
+    var badges = st.badges.length
+      ? '<div class="chip-row">' + st.badges.map(function (b) { return '<span class="chip-mini star">' + b.icon + ' ' + escapeHtml(b.name) + '</span>'; }).join('') + '</div>'
+      : '';
+
+    var past = Object.keys(game.reviews).filter(function (k) {
+      var r = game.reviews[k]; return k !== w.key && (r.helped || r.next);
+    }).sort().reverse().slice(0, 4).map(function (k) {
+      var r = game.reviews[k];
+      return '<li><strong>Semana de ' + k.split('-').reverse().slice(0, 2).join('/') + '</strong>' +
+        (r.helped ? '<br><small>Ajudou: ' + escapeHtml(r.helped) + '</small>' : '') +
+        (r.next ? '<br><small>Intenção: ' + escapeHtml(r.next) + '</small>' : '') + '</li>';
+    }).join('');
+
+    openModal(
+      '<h2>Sua semana</h2>' +
+      '<p class="hint">' + fmtDay(w.from) + ' a ' + fmtDay(w.to) + (new Date().getDay() !== 0 && new Date().getDay() !== 1 ? ' · semana em andamento' : '') + '</p>' +
+      '<div class="wk-chart" aria-label="Itens marcados em cada dia da semana">' + cols + '</div>' +
+      '<p class="wk-sentence">' + sentence + '</p>' + stats + badges +
+      '<label>O que ajudou nesta semana?<input id="m-wk-helped" type="text" maxlength="120" placeholder="Opcional"></label>' +
+      '<label>Uma coisa pequena para a próxima semana<input id="m-wk-next" type="text" maxlength="120" placeholder="Opcional"></label>' +
+      (past ? '<details class="wk-past"><summary>Revisões anteriores</summary><ul>' + past + '</ul></details>' : '') +
+      '<div class="modal-actions">' +
+        '<button id="m-cancel" class="btn btn-secondary">Fechar</button>' +
+        '<button id="m-wk-save" class="btn btn-primary">Guardar</button>' +
+      '</div>'
+    );
+    document.getElementById('m-wk-helped').value = mine.helped || '';
+    document.getElementById('m-wk-next').value = mine.next || '';
+    document.getElementById('m-cancel').addEventListener('click', closeModal);
+    document.getElementById('m-wk-save').addEventListener('click', function () {
+      game.reviews[w.key] = {
+        helped: document.getElementById('m-wk-helped').value.trim(),
+        next: document.getElementById('m-wk-next').value.trim(),
+        at: todayStr(), seen: true
+      };
+      var keys = Object.keys(game.reviews).sort();
+      while (keys.length > 12) delete game.reviews[keys.shift()];
+      saveGame();
+      closeModal();
+      showToast('Guardado 💛');
+    });
+  }
+
   // ---------- modelos de lista, perfis de uso e recompensa ----------
 
   // Passos pequenos e concretos: começar costuma ser a parte mais difícil.
@@ -1419,6 +1610,7 @@
     if (list.days && list.days.length) copy.days = list.days.slice();
     copy.items = list.items.map(function (i) {
       var c = { id: uid(), text: i.text, done: false };
+      if (i.note) c.note = i.note;
       if (i.steps && i.steps.length) c.steps = i.steps.map(function (st) { return { id: uid(), text: st.text, done: false }; });
       return c;
     });
@@ -1739,8 +1931,10 @@
         'Cada quadradinho é um dia; quanto mais escuro, mais itens feitos.</p>' +
       '<h3 style="margin:4px 0 0;font-size:15px;">Conquistas</h3>' +
       '<div class="badges">' + badgesHtml + '</div>' +
+      '<button id="m-open-review" class="btn btn-secondary">📋 Revisão da semana</button>' +
       '<button id="m-cancel" class="btn btn-secondary">Fechar</button>'
     );
+    document.getElementById('m-open-review').addEventListener('click', openWeeklyReview);
     document.getElementById('m-cancel').addEventListener('click', closeModal);
   }
 
@@ -1836,6 +2030,7 @@
     }
     renderGameSummary();
     renderTodayBox();
+    renderWeeklyCard();
     var container = document.getElementById('lists-container');
     container.innerHTML = '';
 
@@ -1989,13 +2184,14 @@
     visibleItems.forEach(function (item) {
       var steps = item.steps || [];
       var snoozed = isSnoozed(item);
-      var expanded = expandedItemId === item.id && (editable || steps.length > 0);
+      var expanded = expandedItemId === item.id && (editable || steps.length > 0 || !!item.note);
       var row = document.createElement('li');
       row.className = 'item-row' + (item.done ? ' done' : '') + (snoozed ? ' snoozed' : '') +
         (expanded ? ' expanded' : '') + (item.id === justCheckedItemId ? ' just-done' : '');
 
       var chips = [];
       if (steps.length) chips.push('<span class="chip-mini">' + (game.calm ? 'com passos' : stepsDoneCount(item) + '/' + steps.length + ' passos') + '</span>');
+      if (item.note) chips.push('<span class="chip-mini">📝 nota' + (findLinks(item.note).length ? ' · link' : '') + '</span>');
       if (snoozed) chips.push('<span class="chip-mini warn">⏰ volta ' + snoozeWhen(item.snoozeUntil) + '</span>');
       if (isPicked(list, item)) chips.push('<span class="chip-mini star">⭐ prioridade de hoje</span>');
 
@@ -2018,7 +2214,7 @@
       row.querySelector('.item-body').addEventListener('click', function () {
         if (!textEl.readOnly) return;
         if (Date.now() - recentDragEndAt < 300) return;
-        if (!editable && !steps.length) return;
+        if (!editable && !steps.length && !item.note) return;
         expandedItemId = expanded ? null : item.id;
         renderDetail();
       });
@@ -2100,10 +2296,16 @@
     } else if (editable) {
       html += '<p class="panel-hint">Divida em passos pequenos: fica mais fácil começar.</p>';
     }
+    if (!editable && item.note) {
+      html += '<div class="note-box"><div class="note-label">📝 Anotação</div><div class="note-text"></div><div class="note-links"></div></div>';
+    }
     if (editable) {
       html += '<div class="step-add">' +
         '<input class="step-input" type="text" maxlength="100" placeholder="Adicionar um passo…" enterkeyhint="done" autocomplete="off">' +
         '<button class="step-add-btn" type="button" aria-label="Adicionar passo">' + ICONS.plus + '</button></div>';
+      html += '<div class="note-box"><label class="note-label" for="note-' + item.id + '">📝 Anotação</label>' +
+        '<textarea id="note-' + item.id + '" class="note-input" rows="2" maxlength="500" placeholder="Endereço, telefone, link, o que não esquecer…"></textarea>' +
+        '<div class="note-links"></div></div>';
       if (!item.done) {
         html += '<div class="panel-actions">' +
           '<button type="button" class="chip" data-act="pick">' + (isPicked(list, item) ? '⭐ Tirar das prioridades' : '⭐ Prioridade de hoje') + '</button>' +
@@ -2136,7 +2338,28 @@
       });
     });
 
-    if (!editable) return panel;
+    if (!editable) {
+      var nt = panel.querySelector('.note-text');
+      if (nt) { nt.textContent = item.note; renderLinkChips(panel.querySelector('.note-links'), findLinks(item.note)); }
+      return panel;
+    }
+
+    var noteEl = panel.querySelector('.note-input');
+    var noteLinks = panel.querySelector('.note-links');
+    noteEl.value = item.note || '';
+    renderLinkChips(noteLinks, findLinks(noteEl.value));
+    autoGrow(noteEl);
+    var noteTimer = null;
+    noteEl.addEventListener('input', function () {
+      autoGrow(noteEl);
+      renderLinkChips(noteLinks, findLinks(noteEl.value));
+      clearTimeout(noteTimer);
+      noteTimer = setTimeout(function () { setNote(item, noteEl.value); }, 600);
+    });
+    noteEl.addEventListener('blur', function () {
+      clearTimeout(noteTimer);
+      if ((item.note || '') !== noteEl.value.trim().slice(0, 500)) setNote(item, noteEl.value);
+    });
 
     function submitSteps() {
       var inp = panel.querySelector('.step-input');
@@ -2421,6 +2644,7 @@
     var lines = [];
     list.items.forEach(function (i) {
       lines.push((i.done ? '✅ ' : '⬜ ') + i.text);
+      if (i.note) lines.push('    📝 ' + String(i.note).replace(/\s+/g, ' ').slice(0, 160));
       (i.steps || []).forEach(function (st) { lines.push('    ' + (st.done ? '✔ ' : '◦ ') + st.text); });
     });
     return list.emoji + ' ' + list.name + '\n' + (lines.length ? lines.join('\n') : '(sem itens)');
@@ -2743,7 +2967,7 @@
     var results = [];
     state.lists.forEach(function (list) {
       list.items.forEach(function (item) {
-        if (normalizeAccents(item.text.toLowerCase()).indexOf(q) !== -1) {
+        if (normalizeAccents((item.text + ' ' + (item.note || '')).toLowerCase()).indexOf(q) !== -1) {
           results.push({ list: list, item: item });
         }
       });
