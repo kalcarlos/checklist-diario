@@ -238,7 +238,7 @@ svg.i.sm { width: 18px; height: 18px; }
 .btn[disabled] { opacity: .5; pointer-events: none; }
 .btn-primary { background: var(--accent); color: var(--on-accent); }
 .btn-secondary { background: var(--surface-2); color: var(--text); }
-.btn-danger { background: var(--danger-soft); color: var(--danger); }
+.btn-danger { background: color-mix(in srgb, var(--danger) 12%, var(--surface)); color: var(--danger); }
 .btn-danger.solid { background: var(--danger); color: #fff; }
 .modal .small-btn, .small-btn { flex: none; min-height: 36px; padding: 0 var(--s-3); font-size: var(--fs-sm); border-radius: var(--r-sm); }
 
