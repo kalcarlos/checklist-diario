@@ -624,9 +624,10 @@
     var left = total - done;
     var html = '';
     if (game.enabled && total > 0) {
-      var label = left === 0 ? 'Tudo feito! 🎉' : (left === 1 ? 'Falta só 1' : 'Faltam ' + left);
+      var label = left === 0 ? 'Tudo feito! 🎉'
+        : (game.calm ? 'Um passo de cada vez 🌱' : (left === 1 ? 'Falta só 1' : 'Faltam ' + left));
       html +=
-        '<div class="detail-progress-label"><span>' + label + '</span><span>' + done + '/' + total + '</span></div>' +
+        '<div class="detail-progress-label"><span>' + label + '</span>' + (game.calm ? '' : '<span>' + done + '/' + total + '</span>') + '</div>' +
         '<div class="progress-bar big"><div style="width:' + Math.round((done / total) * 100) + '%"></div></div>';
     }
     var canFocus = canEditItems(list) && left > 0;
@@ -648,11 +649,13 @@
       if (candidates.length === 0) { skipped = []; candidates = pending; }
       var item = candidates[0];
       openModal(
-        '<p class="hint" style="margin:0;">' + (pending.length === 1 ? 'Falta só 1' : 'Faltam ' + pending.length) +
+        '<p class="hint" style="margin:0;">' + (game.calm ? 'Só esta, por agora' : (pending.length === 1 ? 'Falta só 1' : 'Faltam ' + pending.length)) +
           ' · toque no texto para aumentar/diminuir a letra</p>' +
         '<div id="focus-text" class="focus-text' + (game.focusLarge ? ' large' : '') + '"></div>' +
+        '<div id="focus-timer" class="focus-timer"></div>' +
         '<button id="m-focus-done" class="btn btn-primary">Feito ✓</button>' +
         '<button id="m-focus-split" class="btn btn-secondary">Dividir em passos menores</button>' +
+        '<button id="m-focus-breathe" class="btn btn-secondary">🌬️ Respirar um pouco</button>' +
         (pending.length > 1 ? '<button id="m-focus-skip" class="btn btn-secondary">Pular por agora</button>' : '') +
         '<button id="m-cancel" class="btn btn-secondary">Sair do foco</button>'
       );
@@ -665,6 +668,10 @@
         justCheckedItemId = null;
         render();
       });
+      document.getElementById('m-focus-breathe').addEventListener('click', function () {
+        openBreathing(render);
+      });
+      paintFocusTimer();
       document.getElementById('m-focus-split').addEventListener('click', function () {
         openSplitItem(list, item, render);
       });
@@ -680,6 +687,134 @@
     render();
   }
 
+  // Cronômetro suave do modo foco: tempo curto e opcional, sem alarme alto.
+  var focusTimer = null; // { end, total, id }
+
+  function stopFocusTimer() {
+    if (focusTimer) { clearInterval(focusTimer.id); focusTimer = null; }
+  }
+
+  function startFocusTimer(minutes) {
+    stopFocusTimer();
+    var total = minutes * 60 * 1000;
+    focusTimer = { end: Date.now() + total, total: total, id: setInterval(tickFocusTimer, 1000) };
+    paintFocusTimer();
+  }
+
+  function fmtClock(ms) {
+    var sec = Math.max(0, Math.ceil(ms / 1000));
+    return Math.floor(sec / 60) + ':' + String(sec % 60).padStart(2, '0');
+  }
+
+  function paintFocusTimer() {
+    var box = document.getElementById('focus-timer');
+    if (!box) { stopFocusTimer(); return; }
+    if (!focusTimer) {
+      box.innerHTML = '<span class="hint">Quer tentar por um tempinho?</span>' +
+        [5, 10, 25].map(function (m) {
+          return '<button class="btn btn-secondary small-btn" data-min="' + m + '">⏱️ ' + m + ' min</button>';
+        }).join('');
+      box.querySelectorAll('[data-min]').forEach(function (b) {
+        b.addEventListener('click', function () { startFocusTimer(parseInt(b.getAttribute('data-min'), 10)); });
+      });
+      return;
+    }
+    box.innerHTML = '<div class="timer-track"><div id="focus-timer-bar"></div></div>' +
+      (game.calm ? '' : '<span id="focus-timer-digits" class="hint"></span>') +
+      '<button id="m-timer-stop" class="btn btn-secondary small-btn">Parar</button>';
+    document.getElementById('m-timer-stop').addEventListener('click', function () { stopFocusTimer(); paintFocusTimer(); });
+    tickFocusTimer();
+  }
+
+  function tickFocusTimer() {
+    if (!focusTimer) return;
+    if (!document.getElementById('focus-timer')) { stopFocusTimer(); return; }
+    var left = focusTimer.end - Date.now();
+    if (left <= 0) {
+      stopFocusTimer();
+      vibrate([20, 40, 20]);
+      showToast('⏱️ Tempo! Terminou ou quer mais um pouco? 🌱');
+      paintFocusTimer();
+      return;
+    }
+    var bar = document.getElementById('focus-timer-bar');
+    if (bar) bar.style.width = Math.round((1 - left / focusTimer.total) * 100) + '%';
+    var digits = document.getElementById('focus-timer-digits');
+    if (digits) digits.textContent = fmtClock(left);
+  }
+
+  // Pausa guiada de ~1 minuto: inspira 4s, solta 6s, 6 vezes. Respeita
+  // "reduzir movimento" (o texto continua guiando, só some a animação).
+  function openBreathing(back) {
+    openModal(
+      '<h2>Respirar um pouco</h2>' +
+      '<div id="breath-circle" class="breath-circle"></div>' +
+      '<p id="breath-text" class="focus-text" style="padding:8px;">Fique confortável…</p>' +
+      '<button id="m-cancel" class="btn btn-secondary">Fechar</button>'
+    );
+    document.getElementById('m-cancel').addEventListener('click', back || closeModal);
+    var CYCLES = 6;
+    function step(i) {
+      var circle = document.getElementById('breath-circle');
+      var text = document.getElementById('breath-text');
+      if (!circle || !text) return; // modal fechado
+      if (i >= CYCLES * 2) {
+        circle.className = 'breath-circle';
+        text.textContent = 'Pronto. Volte quando quiser 🌱';
+        return;
+      }
+      var inhale = i % 2 === 0;
+      var ms = inhale ? 4000 : 6000;
+      circle.style.transitionDuration = ms + 'ms';
+      circle.className = 'breath-circle' + (inhale ? ' in' : '');
+      text.textContent = inhale ? 'Inspire pelo nariz…' : 'Solte o ar devagar…';
+      setTimeout(function () { step(i + 1); }, ms);
+    }
+    setTimeout(function () { step(0); }, 1200);
+  }
+
+  // Próximas tarefas na home: só 3 por vez, para não sobrecarregar.
+  function nextTasks() {
+    var all = [];
+    state.lists.forEach(function (l) {
+      if (!canEditItems(l)) return;
+      l.items.forEach(function (i) { if (!i.done) all.push({ list: l, item: i }); });
+    });
+    // rotinas primeiro (são o "hoje" de verdade); a ordem original se mantém dentro de cada grupo
+    var rotinas = all.filter(function (t) { return t.list.type === 'rotina'; });
+    var outras = all.filter(function (t) { return t.list.type !== 'rotina'; });
+    return rotinas.concat(outras).slice(0, 3);
+  }
+
+  function renderTodayBox() {
+    var box = ensureBox('today-box', 'today-box', 'lists-container');
+    box.innerHTML = '';
+    var tasks = game.today === false ? [] : nextTasks();
+    var html = '';
+    if (tasks.length) {
+      html += '<div class="today-title">Para agora</div>';
+      tasks.forEach(function (t, idx) {
+        html += '<div class="today-row" data-idx="' + idx + '"><div class="check"></div>' +
+          '<span class="today-text"></span><span class="today-emoji">' + t.list.emoji + '</span></div>';
+      });
+    }
+    html += '<button id="btn-breathe" class="breathe-btn">🌬️ Respirar um pouco</button>';
+    box.classList.remove('hidden');
+    box.innerHTML = html;
+    box.querySelectorAll('.today-row').forEach(function (row) {
+      var t = tasks[parseInt(row.getAttribute('data-idx'), 10)];
+      row.querySelector('.today-text').textContent = t.item.text;
+      row.querySelector('.check').addEventListener('click', function () {
+        t.item.done = true;
+        save();
+        onItemToggled(t.list, t.item);
+        justCheckedItemId = null;
+        renderHome();
+      });
+    });
+    document.getElementById('btn-breathe').addEventListener('click', function () { openBreathing(closeModal); });
+  }
+
   // Convite gentil na primeira abertura do dia (nunca cobra nem conta o que faltou ontem).
   function maybeGreet() {
     if (!game.enabled || game.greetedOn === todayStr()) return;
@@ -692,7 +827,8 @@
     if (pending === 0) return;
     var h = new Date().getHours();
     var hi = h < 12 ? 'Bom dia!' : (h < 18 ? 'Boa tarde!' : 'Boa noite!');
-    showToast(hi + ' ' + (pending === 1 ? 'Tem 1 tarefa hoje.' : 'Tem ' + pending + ' tarefas hoje.') + ' Que tal começar por uma? 🌱');
+    showToast(hi + ' ' + (game.calm ? 'Sem pressa: que tal escolher uma coisa pequena? 🌱'
+      : (pending === 1 ? 'Tem 1 tarefa hoje.' : 'Tem ' + pending + ' tarefas hoje.') + ' Que tal começar por uma? 🌱'));
   }
 
   // Troca uma tarefa grande por passos menores (um por linha), na mesma posição.
@@ -727,8 +863,10 @@
     var streak = currentStreak();
     var text = week === 0
       ? '🌱 Marque um item para começar'
-      : '🌱 ' + week + (week === 1 ? ' dia ativo' : ' dias ativos') + ' nos últimos 7' +
-        (streak >= 2 ? ' · sequência de ' + streak : '');
+      : (game.calm
+        ? '🌱 Você tem aparecido por aqui, isso conta'
+        : '🌱 ' + week + (week === 1 ? ' dia ativo' : ' dias ativos') + ' nos últimos 7' +
+          (streak >= 2 ? ' · sequência de ' + streak : ''));
     box.classList.remove('hidden');
     box.innerHTML = '<button id="btn-game-history" class="game-summary-btn">' + text + '<span aria-hidden="true">›</span></button>';
     document.getElementById('btn-game-history').addEventListener('click', openGameHistory);
@@ -832,6 +970,7 @@
 
   function renderHome() {
     renderGameSummary();
+    renderTodayBox();
     var container = document.getElementById('lists-container');
     container.innerHTML = '';
 
@@ -1556,6 +1695,10 @@
       '<div class="settings-row"><span>Verificar atualização do app</span><button id="m-check-update" class="btn btn-secondary" style="flex:none;">Verificar</button></div>' +
       '<div class="settings-row"><span>Progresso e feedback ao marcar</span><button id="m-game-toggle" class="btn btn-secondary" style="flex:none;">' +
         (game.enabled ? 'Desativar' : 'Ativar') + '</button></div>' +
+      '<div class="settings-row"><span>Modo tranquilo (sem contagens nem números)</span><button id="m-calm-toggle" class="btn btn-secondary" style="flex:none;">' +
+        (game.calm ? 'Desativar' : 'Ativar') + '</button></div>' +
+      '<div class="settings-row"><span>"Para agora" na home (3 próximas tarefas)</span><button id="m-today-toggle" class="btn btn-secondary" style="flex:none;">' +
+        (game.today === false ? 'Ativar' : 'Desativar') + '</button></div>' +
       '<div class="settings-row"><span>Sugestão de categoria</span><button id="m-reset-learning" class="btn btn-secondary" style="flex:none;">Resetar aprendizado</button></div>' +
       '<div class="settings-row"><span>Bloqueio do app (Face ID/Touch ID)</span><button id="m-app-lock" class="btn btn-secondary" style="flex:none;">' +
         (isAppLockEnabled() ? 'Desativar' : 'Ativar') + '</button></div>' +
@@ -1589,6 +1732,19 @@
 
     document.getElementById('m-game-toggle').addEventListener('click', function () {
       game.enabled = !game.enabled;
+      saveGame();
+      closeModal();
+      if (currentListId) renderDetail(); else renderHome();
+    });
+
+    document.getElementById('m-calm-toggle').addEventListener('click', function () {
+      game.calm = !game.calm;
+      saveGame();
+      closeModal();
+      if (currentListId) renderDetail(); else renderHome();
+    });
+    document.getElementById('m-today-toggle').addEventListener('click', function () {
+      game.today = game.today === false;
       saveGame();
       closeModal();
       if (currentListId) renderDetail(); else renderHome();
