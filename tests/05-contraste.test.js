@@ -59,6 +59,7 @@ async function measureAll(p, scheme, label, bad, counter, includeControl) {
   for (const scheme of ['light', 'dark']) {
     const c = await b.newContext({ serviceWorkers: 'block', viewport: { width: 390, height: 844 }, colorScheme: scheme });
     const p = await c.newPage();
+    await p.clock.install({ time: new Date('2026-10-18T10:00:00') }); // domingo: o cartão da revisão semanal aparece
     await p.goto(URL);
     await p.evaluate(() => {
       localStorage.setItem('checklist-diario:skipLogin', '1');
@@ -67,7 +68,7 @@ async function measureAll(p, scheme, label, bad, counter, includeControl) {
       const other = [0, 1, 2, 3, 4, 5, 6].filter((x) => x !== new Date().getDay()).slice(0, 2);
       localStorage.setItem('checklist-diario:v1', JSON.stringify({ lastResetDate: d(0), wordListStats: {}, trash: [], lists: [
         mk('c', 'Casa', '🏠', 'rotina', [
-          { id: 'a', text: 'Arrumar o quarto', done: false, steps: [{ id: 's1', text: 'Guardar a roupa', done: true }, { id: 's2', text: 'Arrumar a cama', done: false }] },
+          { id: 'a', text: 'Arrumar o quarto', done: false, note: 'Ligar (11) 98765-4321, ver https://site.com/x ou ana@site.com', steps: [{ id: 's1', text: 'Guardar a roupa', done: true }, { id: 's2', text: 'Arrumar a cama', done: false }] },
           { id: 'b', text: 'Pagar a conta de luz', done: false, snoozeUntil: d(-1) },
           { id: 'c', text: 'Regar as plantas', done: false }, { id: 'd', text: 'Passear', done: true }], 0),
         mk('m', 'Mercado', '🛒', 'lista', ['Leite'], 1),
@@ -87,7 +88,8 @@ async function measureAll(p, scheme, label, bad, counter, includeControl) {
     await p.click('#btn-list-menu'); await p.waitForTimeout(500); await measureAll(p, scheme, 'menu da lista', bad, counter); await hideModal();
     await p.click('#btn-back'); await p.waitForTimeout(450);
     await p.click('#btn-settings'); await p.waitForTimeout(500); await measureAll(p, scheme, 'ajustes', bad, counter); await hideModal();
-    await p.click('#btn-game-history'); await p.waitForTimeout(500); await measureAll(p, scheme, 'histórico', bad, counter); await hideModal();
+    await p.click('#btn-game-history'); await p.waitForTimeout(500); await measureAll(p, scheme, 'histórico', bad, counter);
+    await p.click('#m-open-review'); await p.waitForTimeout(400); await measureAll(p, scheme, 'revisão semanal', bad, counter); await hideModal();
     await p.click('#btn-new-list'); await p.waitForTimeout(500); await measureAll(p, scheme, 'nova lista', bad, counter); await hideModal();
     await p.click('#btn-breathe'); await p.waitForTimeout(500); await measureAll(p, scheme, 'respirar (som desligado)', bad, counter);
     await p.click('#m-sound-toggle'); await p.waitForTimeout(400); await measureAll(p, scheme, 'respirar (som ligado)', bad, counter);
