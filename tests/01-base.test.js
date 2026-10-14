@@ -12,6 +12,8 @@ const dk=n=>{const d=new Date();const x=new Date(d.getFullYear(),d.getMonth(),d.
    return p;
  }
  async function boot(p, game, state){
+   // sem 'game' explícito, marca a saudação do dia como já mostrada (senão ela aparece e atrapalha os testes de toast)
+   if(!game) game={greetedOn:dk(0)};
    await p.goto(URL);
    await p.evaluate(([g,s])=>{ if(g) localStorage.setItem('checklist-diario:game',JSON.stringify(g)); if(s) localStorage.setItem('checklist-diario:v1',JSON.stringify(s)); localStorage.setItem('checklist-diario:skipLogin','1'); },[game,state]);
    await p.reload(); await p.waitForTimeout(400);
