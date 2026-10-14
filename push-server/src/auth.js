@@ -160,6 +160,8 @@ export async function handleAccountDelete(request, env, user) {
   stmts.push(env.DB.prepare('DELETE FROM oauth_identities WHERE user_id = ?').bind(user.id));
   stmts.push(env.DB.prepare('DELETE FROM sessions WHERE user_id = ?').bind(user.id));
   stmts.push(env.DB.prepare('DELETE FROM users WHERE id = ?').bind(user.id));
+  // a tabela progress e opcional (so existe depois de aplicar o schema.sql novo): nao pode quebrar a exclusao
+  try { await env.DB.prepare('DELETE FROM progress WHERE user_id = ?').bind(user.id).run(); } catch (e) { /* sem a tabela: nada a apagar */ }
   await env.DB.batch(stmts);
   return json({ ok: true });
 }

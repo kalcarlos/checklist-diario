@@ -10,6 +10,8 @@ import {
   authenticate, handleGoogleLogin, handleGoogleLink, handleRegister, handleLogin, handleLogout, handleMe,
   handleUsernameChange, handleAccountDelete,
 } from './auth.js';
+import { handleProgressGet, handleProgressPut } from './progress.js';
+import { planReminders, sanitizeTaskReminders, carrySent } from './schedule.js';
 import {
   handleListsGet, handleListPut, handleListDelete, handleInviteCreate, handleInvitesList,
   handleInviteRevoke, handleInviteAccept, handleMemberPatch, handleMemberDelete,
@@ -43,7 +45,7 @@ async function routeAccounts(request, env, url) {
   if (method === 'POST' && path === '/auth/google') return handleGoogleLogin(request, env);
 
   const isProtected = path === '/auth/logout' || path === '/auth/me' || path === '/auth/google/link' ||
-    path === '/lists' || path.startsWith('/lists/') || path === '/invites/accept';
+    path === '/lists' || path.startsWith('/lists/') || path === '/invites/accept' || path === '/progress';
   if (!isProtected) return null;
 
   const user = await authenticate(request, env);
@@ -54,6 +56,8 @@ async function routeAccounts(request, env, url) {
   if (method === 'PATCH' && path === '/auth/me') return handleUsernameChange(request, env, user);
   if (method === 'DELETE' && path === '/auth/me') return handleAccountDelete(request, env, user);
   if (method === 'POST' && path === '/auth/google/link') return handleGoogleLink(request, env, user);
+  if (method === 'GET' && path === '/progress') return handleProgressGet(request, env, user);
+  if (method === 'PUT' && path === '/progress') return handleProgressPut(request, env, user);
   if (method === 'GET' && path === '/lists') return handleListsGet(request, env, user);
   if (method === 'POST' && path === '/invites/accept') return handleInviteAccept(request, env, user);
 
@@ -236,9 +240,17 @@ async function handleSubscribe(request, env) {
     subscription: body.subscription,
     timezone: body.timezone || 'America/Sao_Paulo',
     reminders: Array.isArray(body.reminders) ? body.reminders : [],
+    taskReminders: sanitizeTaskReminders(body.taskReminders),
+    muteDate: /^\d{4}-\d{2}-\d{2}$/.test(body.muteDate || '') ? body.muteDate : null,
   };
+  // o app reenvia tudo a cada alteracao: preserva o que ja foi enviado hoje
+  const previous = await env.SUBSCRIPTIONS.get(key, { type: 'json' });
+  carrySent(previous, record);
   await env.SUBSCRIPTIONS.put(key, JSON.stringify(record));
-  return new Response('ok');
+  // "features" deixa o app saber que este servidor entende lembrete por tarefa e progresso
+  return new Response(JSON.stringify({ ok: true, features: ['task-reminders', 'progress'] }), {
+    headers: { 'Content-Type': 'application/json' },
+  });
 }
 
 async function handleUnsubscribe(request, env) {
@@ -284,26 +296,13 @@ async function runScheduledCheck(env) {
     const { date, hm } = nowPartsInTz(record.timezone);
     // dia da semana (0 = domingo) na data local da pessoa
     const weekday = new Date(date + 'T00:00:00Z').getUTCDay();
-    let changed = false;
+    const plan = planReminders(record, { date, hm, weekday });
+    let changed = plan.changed;
 
-    for (const reminder of record.reminders) {
-      if (!reminder.enabled) continue;
-      if (reminder.time !== hm) continue;
-      if (reminder.lastSentDate === date) continue;
-      // rotina só em certos dias da semana (lista vazia ou ausente = todo dia)
-      if (Array.isArray(reminder.days) && reminder.days.length && !reminder.days.includes(weekday)) {
-        reminder.lastSentDate = date; changed = true; continue;
-      }
-      if (reminder.hasPending === false) { reminder.lastSentDate = date; changed = true; continue; }
-
+    for (const item of plan.due) {
       try {
-        await sendWebPush(record.subscription, {
-          title: `${reminder.emoji || '✅'} ${reminder.listName}`,
-          body: 'Hora de checar essa lista.',
-          tag: 'checklist-' + reminder.listId,
-          listId: reminder.listId,
-        }, env);
-        reminder.lastSentDate = date;
+        await sendWebPush(record.subscription, item.payload, env);
+        item.mark();
         changed = true;
       } catch (err) {
         // Inscricao invalida (expirou / usuario desinstalou) -> remove.
