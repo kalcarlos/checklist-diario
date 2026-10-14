@@ -559,6 +559,7 @@
       if ((list.lastResetDate || state.lastResetDate) === today) return;
       list.items.forEach(function (item) {
         item.done = false;
+        delete item.doneBy;
         if (item.steps) item.steps.forEach(function (st) { st.done = false; });
       });
       list.lastResetDate = today;
@@ -704,7 +705,9 @@
       showToast(badge.icon + ' Conquista: ' + badge.name);
     } else if (complete) {
       vibrate([20, 40, 20]);
-      showToast(CELEBRATIONS[Math.floor(Math.random() * CELEBRATIONS.length)]);
+      showToast(isSharedList(list) && contributions(list).length >= 2
+        ? 'Vocês completaram a lista juntos! 🎉'
+        : CELEBRATIONS[Math.floor(Math.random() * CELEBRATIONS.length)]);
     } else {
       vibrate(12);
       if (firstOfDay) showToast('Primeiro do dia! 🌱');
@@ -749,6 +752,12 @@
       html +=
         '<div class="detail-progress-label"><span>' + label + '</span>' + (game.calm ? '' : '<span>' + done + '/' + total + '</span>') + '</div>' +
         '<div class="progress-bar big"><div style="width:' + Math.round((done / total) * 100) + '%"></div></div>';
+    }
+    var contrib = isSharedList(list) ? contributions(list) : [];
+    if (contrib.length && total > 0) {
+      html += '<div class="coop-line">👥 ' + (game.calm
+        ? 'Vocês estão fazendo isso juntos'
+        : 'Juntos: ' + contrib.map(function (c) { return escapeHtml(doerName(c.name)) + ' ' + c.count; }).join(' · ')) + '</div>';
     }
     box.classList.toggle('is-done', total > 0 && left === 0);
     var canFocus = canEditItems(list) && left > 0;
@@ -808,7 +817,7 @@
         openSnoozeSheet(list, item, function () { renderDetail(); render(); });
       });
       document.getElementById('m-focus-done').addEventListener('click', function () {
-        item.done = true;
+        setDone(list, item, true);
         save();
         onItemToggled(list, item);
         renderDetail();
@@ -1197,7 +1206,7 @@
       var t = tasks[parseInt(row.getAttribute('data-idx'), 10)];
       row.querySelector('.today-text').textContent = t.item.text;
       row.querySelector('.check').addEventListener('click', function () {
-        t.item.done = true;
+        setDone(t.list, t.item, true);
         save();
         onItemToggled(t.list, t.item);
         justCheckedItemId = null;
@@ -1248,6 +1257,36 @@
     return '';
   }
 
+  // ---------- cooperativo: quem concluiu cada item (listas compartilhadas) ----------
+  // Cada item concluído guarda `doneBy` (nome de quem marcou). Vai junto com o item
+  // na sincronização, então não precisa de nada novo no servidor.
+
+  function isSharedList(list) {
+    return !!(list.role && (list.role !== 'owner' || (list.members && list.members.length > 0)));
+  }
+
+  function setDone(list, item, value) {
+    item.done = value;
+    if (value && session && isSharedList(list)) item.doneBy = session.username; else delete item.doneBy;
+  }
+
+  function doerName(name) {
+    return session && name === session.username ? 'Você' : name;
+  }
+
+  // [{name, count}] dos itens concluídos (não adiados) por pessoa, do maior para o menor
+  function contributions(list) {
+    var by = {};
+    activeItems(list).forEach(function (i) { if (i.done && i.doneBy) by[i.doneBy] = (by[i.doneBy] || 0) + 1; });
+    return Object.keys(by).map(function (n) { return { name: n, count: by[n] }; })
+      .sort(function (a, b) {
+        if (b.count !== a.count) return b.count - a.count;
+        var meA = session && a.name === session.username, meB = session && b.name === session.username;
+        if (meA !== meB) return meA ? -1 : 1; // no empate, "Você" vem primeiro
+        return a.name < b.name ? -1 : 1;
+      });
+  }
+
   // passos (subtarefas) do item
   function stepsDoneCount(item) {
     return (item.steps || []).filter(function (st) { return st.done; }).length;
@@ -1260,11 +1299,11 @@
     if (game.enabled) recordCheck(step.done ? 1 : -1);
     var all = item.steps.length > 0 && item.steps.every(function (st) { return st.done; });
     if (all && !item.done) {
-      item.done = true;
+      setDone(list, item, true);
       save();
       onItemToggled(list, item);
     } else if (!step.done && item.done) {
-      item.done = false;
+      setDone(list, item, false);
       save();
       onItemToggled(list, item);
     } else {
@@ -2191,6 +2230,7 @@
 
       var chips = [];
       if (steps.length) chips.push('<span class="chip-mini">' + (game.calm ? 'com passos' : stepsDoneCount(item) + '/' + steps.length + ' passos') + '</span>');
+      if (item.done && item.doneBy && isSharedList(list)) chips.push('<span class="chip-mini done-by">✓ ' + escapeHtml(doerName(item.doneBy)) + '</span>');
       if (item.note) chips.push('<span class="chip-mini">📝 nota' + (findLinks(item.note).length ? ' · link' : '') + '</span>');
       if (snoozed) chips.push('<span class="chip-mini warn">⏰ volta ' + snoozeWhen(item.snoozeUntil) + '</span>');
       if (isPicked(list, item)) chips.push('<span class="chip-mini star">⭐ prioridade de hoje</span>');
@@ -2228,7 +2268,7 @@
       }
 
       row.querySelector('.check').addEventListener('click', function () {
-        item.done = !item.done;
+        setDone(list, item, !item.done);
         save();
         justCheckedItemId = null;
         onItemToggled(list, item);
@@ -2860,12 +2900,16 @@
 
     function setAllDone(value, label) {
       var before = {};
-      list.items.forEach(function (i) { before[i.id] = i.done; i.done = value; });
+      list.items.forEach(function (i) { before[i.id] = { done: i.done, by: i.doneBy }; if (i.done !== value) setDone(list, i, value); });
       save();
       closeModal();
       renderDetail();
       showUndo(label, function () {
-        list.items.forEach(function (i) { if (i.id in before) i.done = before[i.id]; });
+        list.items.forEach(function (i) {
+          if (!(i.id in before)) return;
+          i.done = before[i.id].done;
+          if (before[i.id].by) i.doneBy = before[i.id].by; else delete i.doneBy;
+        });
         save();
         if (currentListId === list.id) renderDetail();
       });
