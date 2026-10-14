@@ -1035,3 +1035,15 @@ svg.i.sm { width: 18px; height: 18px; }
 .remind-box input { font: inherit; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface); color: var(--text); min-height: 44px; }
 .remind-btns { display: flex; gap: var(--s-2); flex-basis: 100%; }
 .remind-hint { flex-basis: 100%; margin: 0; }
+
+/* anotar rápido */
+.fab-mini {
+  width: 48px; height: 48px; border-radius: 16px;
+  right: calc(var(--s-5) + 7px);
+  bottom: calc(var(--s-6) + var(--safe-bottom) + 72px);
+  background: var(--surface); color: var(--accent); border: 1px solid var(--border);
+}
+.fab-mini svg.i { width: 22px; height: 22px; }
+#m-cap-text { font: inherit; width: 100%; resize: none; padding: 12px; border-radius: 12px; border: 1px solid var(--border); background: var(--surface); color: var(--text); min-height: 76px; }
+#m-cap-list { font: inherit; width: 100%; min-height: 44px; padding: 8px 10px; border-radius: 12px; border: 1px solid var(--border); background: var(--surface); color: var(--text); }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }

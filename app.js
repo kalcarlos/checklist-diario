@@ -2624,6 +2624,95 @@
     modal.addEventListener('pointercancel', end);
   })();
 
+  // ---------- anotar rápido ----------
+  // Pensado para o momento em que a ideia some em segundos: abre já com o teclado,
+  // guarda sem pedir lista (cai na sugestão ou na "Caixa de entrada") e continua aberto.
+
+  var INBOX_NAME = 'Caixa de entrada';
+
+  function findInbox() {
+    return state.lists.filter(function (l) { return l.name === INBOX_NAME && !l.role; })[0] || null;
+  }
+
+  function captureTargets() {
+    var lists = state.lists.filter(canEditItems);
+    return lists;
+  }
+
+  function captureItems(text, listId) {
+    var lines = String(text).split(/\n+/).map(function (t) { return t.trim().slice(0, 200); }).filter(Boolean).slice(0, 20);
+    if (!lines.length) return null;
+    var list;
+    if (listId === '__inbox') {
+      list = findInbox();
+      if (!list) { list = createList(INBOX_NAME, '📥', 'lista'); state.lists.push(list); }
+    } else {
+      list = getList(listId);
+    }
+    if (!list || !canEditItems(list)) return null;
+    lines.forEach(function (t) {
+      list.items.push({ id: uid(), text: t, done: false });
+      learnFromText(t, list.id);
+    });
+    save();
+    return { list: list, count: lines.length };
+  }
+
+  // index.html antigo em cache não tem o botão: cria na hora, junto do "+".
+  var captureBtn = document.getElementById('btn-capture');
+  if (!captureBtn) {
+    captureBtn = document.createElement('button');
+    captureBtn.id = 'btn-capture';
+    captureBtn.className = 'fab fab-mini';
+    captureBtn.setAttribute('aria-label', 'Anotar rápido');
+    captureBtn.innerHTML = '<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M13 3 5 13.5h6L10 21l8-10.5h-6z"/></svg>';
+    var fabNew = document.getElementById('btn-new-list');
+    fabNew.parentNode.insertBefore(captureBtn, fabNew);
+  }
+  captureBtn.addEventListener('click', function () {
+    var targets = captureTargets();
+    var inbox = findInbox();
+    var picked = false;
+    var options = targets.map(function (l) {
+      return '<option value="' + l.id + '">' + l.emoji + ' ' + escapeHtml(l.name) + '</option>';
+    }).join('');
+    if (!inbox) options = '<option value="__inbox">📥 ' + INBOX_NAME + ' (nova)</option>' + options;
+    openModal(
+      '<h2>Anotar rápido</h2>' +
+      '<label class="sr-only" for="m-cap-text">O que veio à cabeça?</label>' +
+      '<textarea id="m-cap-text" rows="3" maxlength="600" placeholder="O que veio à cabeça? (uma ideia por linha)" enterkeyhint="done" autocomplete="off"></textarea>' +
+      '<label>Guardar em<select id="m-cap-list">' + options + '</select></label>' +
+      '<p id="m-cap-msg" class="hint" role="status" aria-live="polite" style="margin:0;"></p>' +
+      '<div class="modal-actions"><button id="m-cap-close" class="btn btn-secondary">Fechar</button><button id="m-cap-save" class="btn btn-primary">Guardar</button></div>'
+    );
+    var ta = document.getElementById('m-cap-text'), sel = document.getElementById('m-cap-list'), msg = document.getElementById('m-cap-msg');
+    if (inbox) sel.value = inbox.id;
+    sel.addEventListener('change', function () { picked = true; });
+    ta.addEventListener('input', function () {
+      autoGrow(ta);
+      if (picked) return;
+      var sug = bestSuggestion(ta.value, null);
+      var target = sug && getList(sug.listId);
+      if (target && canEditItems(target)) sel.value = target.id;
+      else sel.value = inbox && sel.querySelector('option[value="' + inbox.id + '"]') ? inbox.id : '__inbox';
+    });
+    function saveCapture() {
+      var res = captureItems(ta.value, sel.value);
+      if (!res) { ta.focus(); return; }
+      ta.value = ''; autoGrow(ta);
+      msg.textContent = (res.count > 1 ? res.count + ' anotações guardadas em ' : 'Guardado em ') + res.list.emoji + ' ' + res.list.name + '. Pode anotar mais.';
+      renderHome();
+      inbox = findInbox();
+      ta.focus();
+    }
+    document.getElementById('m-cap-save').addEventListener('click', saveCapture);
+    document.getElementById('m-cap-close').addEventListener('click', closeModal);
+    ta.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); saveCapture(); }
+    });
+    setTimeout(function () { ta.focus(); }, 60);
+  });
+
   // ---------- nova lista ----------
 
   document.getElementById('btn-new-list').addEventListener('click', function () {
