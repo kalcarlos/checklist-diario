@@ -1,0 +1,58 @@
+// Testes unitários (Node, sem navegador) das funções puras de pure.js.
+const P = require('../pure.js');
+
+let pass = 0, fail = 0;
+const ok = (n, c, x) => { if (c) { pass++; console.log('  ok  ', n); } else { fail++; console.log('  FAIL', n, x === undefined ? '' : JSON.stringify(x)); } };
+
+console.log('1. parseWhen (quarta, 14/10/2026, 09:00)');
+const NOW = new Date(2026, 9, 14, 9, 0, 0);
+const w = (t, now) => { const r = P.parseWhen(t, now || NOW); return r ? r.date + ' ' + r.time : null; };
+const cases = [
+  ['ligar amanhã 10h', '2026-10-15 10:00'], ['Ligar AMANHÃ 10H', '2026-10-15 10:00'], ['reunião hoje 15:30', '2026-10-14 15:30'],
+  ['remédio 21h', '2026-10-14 21:00'], ['acordar 7h', '2026-10-15 07:00'], ['sexta 14h', '2026-10-16 14:00'],
+  ['sexta-feira 14h', '2026-10-16 14:00'], ['quarta às 14h30', '2026-10-21 14:30'], ['domingo 8h', '2026-10-18 08:00'],
+  ['depois de amanhã 9h', '2026-10-16 09:00'], ['jantar hoje 9h da noite', '2026-10-14 21:00'], ['café às 11', '2026-10-14 11:00'],
+  ['almoço 12h da tarde', '2026-10-14 12:00'], ['(amanhã 8h)', '2026-10-15 08:00'], ['terça 10:05.', '2026-10-20 10:05'],
+  ['comprar 3 pães', null], ['pagar dia 10/10', null], ['hoje 8h', null], ['hoje 9h', null], ['amanhã', null], ['senha 25h', null],
+  ['10h30m', null], ['', null], ['às 24', null], ['reunião 12:60', null],
+];
+cases.forEach(([t, want]) => ok(JSON.stringify(t) + ' → ' + want, w(t) === want, w(t)));
+ok('virada de mês: 31/10 + amanhã', w('amanhã 8h', new Date(2026, 9, 31, 9, 0)) === '2026-11-01 08:00');
+ok('virada de ano: 31/12 + amanhã', w('amanhã 8h', new Date(2026, 11, 31, 9, 0)) === '2027-01-01 08:00');
+ok('sem dia e hora já passou: amanhã', w('academia 6h') === '2026-10-15 06:00');
+
+console.log('2. findLinks');
+const L = (t) => P.findLinks(t).map((x) => x.type + ':' + x.href);
+ok('site com www', L('veja www.exemplo.com.br/x?y=1.').join() === 'url:https://www.exemplo.com.br/x?y=1');
+ok('http completo e rótulo é só o host', P.findLinks('https://a.com/b/c')[0].label === 'a.com');
+ok('e-mail', L('mande para ana@site.com.br hoje').join() === 'mail:mailto:ana@site.com.br');
+ok('telefone com DDD', L('ligar (11) 91234-5678').join() === 'tel:tel:11912345678');
+ok('telefone +55', L('+55 11 91234-5678').join() === 'tel:tel:+5511912345678');
+ok('8 dígitos com hífen', L('fixo 3456-7890').join() === 'tel:tel:34567890');
+ok('número solto, CPF e data não viram link', L('pedido 123456 cpf 123.456.789-00 em 10/10/2026').length === 0, L('pedido 123456 cpf 123.456.789-00 em 10/10/2026'));
+ok('sem repetir o mesmo link', L('a.com https://a.com https://a.com').length === 1 || L('https://a.com https://a.com').length === 1);
+ok('texto vazio ou nulo', P.findLinks('').length === 0 && P.findLinks(null).length === 0);
+
+console.log('3. mergeProgressInto');
+const mk = (o) => Object.assign({ days: {}, doneLists: {}, badges: {}, total: 0, listsDone: 0, reviews: {} }, o);
+const A = () => mk({ days: { '2026-10-10': 3, '2026-10-11': 1 }, badges: { first: '2026-10-10' }, total: 10, listsDone: 2, reviews: { '2026-10-04': { helped: 'x', next: 'y', at: '2026-10-05', seen: true } } });
+const B = { days: { '2026-10-10': 5, '2026-10-12': 2 }, doneLists: { '2026-10-12': 1 }, badges: { first: '2026-10-01', streak7: '2026-10-09' }, total: 25, listsDone: 1, reviews: { '2026-10-04': { seen: true, at: '2026-10-04' }, '2026-09-27': { seen: true, at: '2026-09-28' } } };
+let g = A(); const changed = P.mergeProgressInto(g, B);
+ok('maior contagem por dia', g.days['2026-10-10'] === 5 && g.days['2026-10-11'] === 1 && g.days['2026-10-12'] === 2, g.days);
+ok('conquista mais antiga e novas conquistas', g.badges.first === '2026-10-01' && g.badges.streak7 === '2026-10-09', g.badges);
+ok('totais pelo maior', g.total === 25 && g.listsDone === 2);
+ok('revisão local (com texto) é preservada; nova vem só como "vista"', g.reviews['2026-10-04'].helped === 'x' && g.reviews['2026-09-27'].seen === true && g.reviews['2026-09-27'].helped === '', g.reviews);
+ok('avisa que mudou', changed === true);
+const snap = JSON.stringify(g);
+ok('idempotente: repetir não muda nada e retorna false', P.mergeProgressInto(g, B) === false && JSON.stringify(g) === snap);
+const g2 = mk(B); P.mergeProgressInto(g2, A());
+const stable = (o) => JSON.stringify(o, (k, v) => (v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).sort()) : v));
+ok('comutativo nos números (A+B == B+A)', stable([g.days, g.badges, g.total, g.listsDone]) === stable([g2.days, g2.badges, g2.total, g2.listsDone]), [g2.days, g2.badges]);
+ok('entrada inválida não quebra', P.mergeProgressInto(A(), null) === false && P.mergeProgressInto(A(), 'x') === false);
+
+console.log('4. dayKey e plain');
+ok('dayKey com zero à esquerda', P.dayKey(new Date(2026, 0, 5)) === '2026-01-05');
+ok('plain tira acentos e baixa caixa', P.plain('AMANHÃ às Ç') === 'amanha as c');
+
+console.log(`\n${pass} ok, ${fail} falhas`);
+process.exit(fail ? 1 : 0);

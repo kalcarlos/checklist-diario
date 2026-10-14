@@ -99,6 +99,11 @@ A paleta foi pensada para ser calma (útil para ansiedade e TDAH): fundo "papel"
 
 O ícone (`icons/`) é gerado por `node gen-icons.js`, sem dependências: círculo claro com check sobre degradê índigo, o mesmo símbolo de "feito" da interface. Há versões normal (cantos arredondados), opaca para o iPhone (`apple-touch-icon`, o iOS arredonda sozinho) e *maskable* para Android. As URLs levam `?v=2`; ao trocar o desenho, aumente esse número em `index.html` e `manifest.json`. **No iPhone o ícone da Tela de Início só muda se o app for removido e adicionado de novo** (exporte um backup antes ou entre numa conta, porque os dados locais ficam no app instalado).
 
+## Estrutura do código
+
+- `index.html`, `styles.css`, `app.js` (a interface e o estado), `service-worker.js`.
+- `pure.js`: funções puras (interpretar "amanhã 10h", achar links, juntar progresso, datas), sem DOM nem estado. Carrega antes do `app.js`, roda também em Node e tem testes unitários rápidos (`tests/13-puras.test.js`). Novas funções sem efeito colateral devem nascer aqui. Um `index.html` antigo em cache (sem a tag do `pure.js`) continua funcionando: o `app.js` lê o arquivo sozinho.
+
 ## Testes
 
 Testes de ponta a ponta com Playwright (Chromium), cobrindo fluxos, layout em várias larguras, temas, contraste WCAG e o caso do `index.html` antigo em cache. O runner sobe o servidor sozinho.
