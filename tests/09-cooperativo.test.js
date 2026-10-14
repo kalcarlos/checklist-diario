@@ -11,12 +11,13 @@ const dk = (n) => { const d = new Date(); const x = new Date(d.getFullYear(), d.
   const mkList = (id, name, type, items, extra) => Object.assign({ id, name, emoji: '🏠', type, items: items.map((t, i) => (typeof t === 'string' ? mkItem(id + i, t) : t)), sortOrder: 'manual', reminder: { enabled: false, times: [] } }, extra || {});
   const mkState = (l, last) => ({ lastResetDate: last || dk(0), wordListStats: {}, trash: [], lists: l });
   const G = (x) => Object.assign({ enabled: true, days: {}, badges: { first: 'x', list1: 'x' }, total: 0, listsDone: 5, greetedOn: dk(0), onboarded: true }, x || {});
+  const ME = 'zeca'; // alfabeticamente depois de "carla": "Você" tem que vir primeiro no empate mesmo assim
   const SHARED = { role: 'editor', rev: 1, ownerName: 'bruno', members: [{ userId: 'u2', username: 'bruno', role: 'owner' }] };
   async function fresh(o, withSession) {
     const c = await b.newContext(Object.assign({ viewport: { width: 390, height: 844 }, serviceWorkers: 'block' }, o || {}));
     await c.route(/workers\.dev/, (r) => r.abort()); // sem servidor: tudo local
     const p = await c.newPage(); p.errs = []; p.on('pageerror', (e) => p.errs.push(e.message));
-    p.__session = withSession === false ? null : { token: 't', username: 'ana', userId: 'u1' };
+    p.__session = withSession === false ? null : { token: 't', username: ME, userId: 'u1' };
     return p;
   }
   async function boot(p, state, game) {
@@ -39,8 +40,8 @@ const dk = (n) => { const d = new Date(); const x = new Date(d.getFullYear(), d.
   await openList(p);
   ok('lista compartilhada sem ninguém ter feito nada: sem linha "Juntos"', (await p.$('.coop-line')) === null);
   await p.click(item(p, 1) + ' .check'); await p.waitForTimeout(150);
-  ok('marcar grava doneBy com o nome de quem marcou', (await stored(p)).lists[0].items[0].doneBy === 'ana');
-  ok('a linha do item mostra "✓ você"', /✓ você/.test(await p.textContent(item(p, 1) + ' .item-meta')));
+  ok('marcar grava doneBy com o nome de quem marcou', (await stored(p)).lists[0].items[0].doneBy === ME);
+  ok('a linha do item mostra "✓ Você"', /✓ Você/.test(await p.textContent(item(p, 1) + ' .item-meta')));
   ok('cartão mostra "Juntos: Você 1"', /Juntos: Você 1/.test(await p.textContent('.coop-line')), await p.textContent('.coop-line'));
   await p.click(item(p, 1) + ' .check'); await p.waitForTimeout(150);
   ok('desmarcar remove doneBy (sem resíduo)', !('doneBy' in (await stored(p)).lists[0].items[0]));
@@ -53,7 +54,7 @@ const dk = (n) => { const d = new Date(); const x = new Date(d.getFullYear(), d.
   ok('contribuições em ordem (mais itens primeiro): "bruno 2 · carla 1"', /Juntos: bruno 2 · carla 1/.test(await p.textContent('.coop-line')), await p.textContent('.coop-line'));
   ok('chips mostram o nome de cada pessoa', /✓ bruno/.test(await p.textContent(item(p, 1))) && /✓ carla/.test(await p.textContent(item(p, 3))));
   await p.click(item(p, 4) + ' .check'); await p.waitForTimeout(150);
-  ok('minha parte entra como "Você 1" (empate desempata por nome)', /Juntos: bruno 2 · carla 1 · Você 1/.test(await p.textContent('.coop-line')), await p.textContent('.coop-line'));
+  ok('minha parte entra como "Você 1", antes de carla no empate', /Juntos: bruno 2 · Você 1 · carla 1/.test(await p.textContent('.coop-line')), await p.textContent('.coop-line'));
   await p.click(item(p, 5) + ' .check'); await p.waitForTimeout(200);
   ok('concluir a lista com 2+ pessoas: "Vocês completaram a lista juntos"', /Vocês completaram a lista juntos/.test(await p.textContent('#game-toast')), await p.textContent('#game-toast'));
   // uma pessoa só: celebração normal
@@ -70,7 +71,7 @@ const dk = (n) => { const d = new Date(); const x = new Date(d.getFullYear(), d.
   ok('dono sem membros ainda não conta como compartilhada', !('doneBy' in (await stored(p)).lists[0].items[0]));
   p = await fresh(); await boot(p, mkState([mkList('c', 'Casa', 'lista', ['A'], { role: 'owner', rev: 1, members: [{ userId: 'u2', username: 'bruno', role: 'editor' }] })]));
   await openList(p); await p.click(item(p, 1) + ' .check'); await p.waitForTimeout(150);
-  ok('dono com pelo menos 1 membro conta como compartilhada', (await stored(p)).lists[0].items[0].doneBy === 'ana');
+  ok('dono com pelo menos 1 membro conta como compartilhada', (await stored(p)).lists[0].items[0].doneBy === ME);
   p = await fresh({}, false); await boot(p, mkState([mkList('c', 'Casa', 'lista', ['A'], SHARED)]));
   await openList(p); await p.click(item(p, 1) + ' .check'); await p.waitForTimeout(150);
   ok('sem sessão não dá para atribuir: não grava doneBy', !('doneBy' in (await stored(p)).lists[0].items[0]));
@@ -78,18 +79,18 @@ const dk = (n) => { const d = new Date(); const x = new Date(d.getFullYear(), d.
   console.log('4. Todos os caminhos de marcar');
   p = await fresh(); await boot(p, mkState([mkList('c', 'Casa', 'rotina', ['Foco 1', 'Foco 2'], SHARED)]));
   await p.click('.today-row .check'); await p.waitForTimeout(150);
-  ok('pelo "Para agora"', (await stored(p)).lists[0].items[0].doneBy === 'ana');
+  ok('pelo "Para agora"', (await stored(p)).lists[0].items[0].doneBy === ME);
   await openList(p); await p.click('#btn-focus'); await p.click('#m-focus-done'); await p.waitForTimeout(250);
-  ok('pelo modo foco', (await stored(p)).lists[0].items[1].doneBy === 'ana');
+  ok('pelo modo foco', (await stored(p)).lists[0].items[1].doneBy === ME);
   p = await fresh(); await boot(p, mkState([mkList('c', 'Casa', 'lista', [mkItem('a', 'Com passos', { steps: [{ id: 's1', text: 'p1', done: false }] })], SHARED)]));
   await openList(p); await p.click(item(p, 1) + ' .item-body'); await p.waitForTimeout(80); await p.click('.step-row .step-check'); await p.waitForTimeout(200);
-  ok('fechando o último passo (conclusão automática)', (await stored(p)).lists[0].items[0].doneBy === 'ana');
+  ok('fechando o último passo (conclusão automática)', (await stored(p)).lists[0].items[0].doneBy === ME);
   await p.click('.step-row .step-check'); await p.waitForTimeout(150);
   ok('reabrindo um passo remove doneBy', !('doneBy' in (await stored(p)).lists[0].items[0]));
   p = await fresh(); await boot(p, mkState([mkList('c', 'Casa', 'lista', [mkItem('a', 'A', { done: true, doneBy: 'bruno' }), mkItem('b', 'B'), mkItem('c', 'C')], SHARED)]));
   await openList(p); await p.click('#btn-list-menu'); await p.click('#m-check-all'); await p.waitForTimeout(200);
   let it = (await stored(p)).lists[0].items;
-  ok('marcar todos: novos ficam por mim e o que o bruno fez continua do bruno', it[0].doneBy === 'bruno' && it[1].doneBy === 'ana' && it[2].doneBy === 'ana', it.map((i) => i.doneBy));
+  ok('marcar todos: novos ficam por mim e o que o bruno fez continua do bruno', it[0].doneBy === 'bruno' && it[1].doneBy === ME && it[2].doneBy === ME, it.map((i) => i.doneBy));
   await p.click('#undo-toast .undo-btn'); await p.waitForTimeout(150);
   it = (await stored(p)).lists[0].items;
   ok('desfazer devolve cada item (e doneBy) ao estado anterior', it[0].done && it[0].doneBy === 'bruno' && !it[1].done && !('doneBy' in it[1]) && !it[2].done, it);

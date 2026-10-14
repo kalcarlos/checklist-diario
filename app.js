@@ -1279,7 +1279,12 @@
     var by = {};
     activeItems(list).forEach(function (i) { if (i.done && i.doneBy) by[i.doneBy] = (by[i.doneBy] || 0) + 1; });
     return Object.keys(by).map(function (n) { return { name: n, count: by[n] }; })
-      .sort(function (a, b) { return b.count - a.count || (a.name < b.name ? -1 : 1); });
+      .sort(function (a, b) {
+        if (b.count !== a.count) return b.count - a.count;
+        var meA = session && a.name === session.username, meB = session && b.name === session.username;
+        if (meA !== meB) return meA ? -1 : 1; // no empate, "Você" vem primeiro
+        return a.name < b.name ? -1 : 1;
+      });
   }
 
   // passos (subtarefas) do item
