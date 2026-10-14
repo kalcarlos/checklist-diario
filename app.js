@@ -36,7 +36,8 @@
     '🏠', '🛒', '💊', '📞', '🧺', '🐶', '🐱', '💼', '🧹', '🚗', '💰', '🏋️',
     '📚', '🍽️', '🧴', '🪴', '👶', '🎂', '🎁', '✈️', '🏥', '🦷', '👓', '💇',
     '💅', '🧾', '📦', '🔧', '🔌', '🧑‍💻', '📅', '🐾', '🍎', '🧽', '🛠️', '🎓',
-    '⚽', '🎮', '🎵', '🌱', '🧻', '📮', '🏦', '⛪', '🚲', '🧵', '🐦', '🧯'
+    '⚽', '🎮', '🎵', '🌱', '🧻', '📮', '🏦', '⛪', '🚲', '🧵', '🐦', '🧯',
+    '🌅', '🌙', '🧳'
   ];
 
   // Preencher com a URL do Worker depois de "wrangler deploy" (ex: https://checklist-diario-push.SEU-SUBDOMINIO.workers.dev)
@@ -355,9 +356,12 @@
     return state;
   }
 
+  var isNewInstall = false;
+
   function load() {
     var raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) {
+      isNewInstall = true;
       state = seedData();
       save();
       return;
@@ -406,17 +410,96 @@
     Object.keys(state.wordListStats).forEach(function (word) {
       delete state.wordListStats[word][list.id];
     });
-    state.trash.push({ id: uid(), type: 'list', deletedAt: Date.now(), list: list });
+    var entry = { id: uid(), type: 'list', deletedAt: Date.now(), list: list };
+    state.trash.push(entry);
     save();
+    return entry;
   }
 
   function moveItemToTrash(list, item) {
     list.items = list.items.filter(function (i) { return i.id !== item.id; });
-    state.trash.push({
+    var entry = {
       id: uid(), type: 'item', deletedAt: Date.now(),
       listId: list.id, listName: list.name, listEmoji: list.emoji, item: item
+    };
+    state.trash.push(entry);
+    save();
+    return entry;
+  }
+
+  // ---------- desfazer ----------
+  // Aviso com botão "Desfazer" (6s) depois de ações que apagam ou mudam muita
+  // coisa de uma vez. Tira o medo de errar o toque.
+
+  var undoTimer = null;
+
+  function hideUndo() {
+    clearTimeout(undoTimer);
+    var el = document.getElementById('undo-toast');
+    if (el) el.classList.remove('show');
+  }
+
+  function showUndo(message, undoFn) {
+    var el = document.getElementById('undo-toast');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'undo-toast';
+      el.className = 'undo-toast';
+      el.setAttribute('role', 'status');
+      el.setAttribute('aria-live', 'polite');
+      document.body.appendChild(el);
+    }
+    el.innerHTML = '<span class="undo-msg"></span><button type="button" class="undo-btn">Desfazer</button>';
+    el.querySelector('.undo-msg').textContent = message;
+    el.querySelector('.undo-btn').addEventListener('click', function () {
+      hideUndo();
+      undoFn();
+    });
+    void el.offsetWidth;
+    el.classList.add('show');
+    clearTimeout(undoTimer);
+    undoTimer = setTimeout(hideUndo, 6000);
+  }
+
+  function dropTrashEntry(entryId) {
+    state.trash = state.trash.filter(function (t) { return t.id !== entryId; });
+  }
+
+  // Volta um ou mais itens pra lista, nas posições originais.
+  function undoItemsTrash(list, removed) {
+    removed.slice().sort(function (a, b) { return a.idx - b.idx; }).forEach(function (r) {
+      dropTrashEntry(r.entryId);
+      if (!list.items.some(function (i) { return i.id === r.item.id; })) {
+        list.items.splice(Math.min(r.idx, list.items.length), 0, r.item);
+      }
     });
     save();
+    if (currentListId === list.id) renderDetail();
+  }
+
+  function trashItemWithUndo(list, item) {
+    var idx = list.items.indexOf(item);
+    var entry = moveItemToTrash(list, item);
+    renderDetail();
+    showUndo('Item excluído', function () {
+      undoItemsTrash(list, [{ item: item, idx: idx, entryId: entry.id }]);
+    });
+  }
+
+  function trashListWithUndo(list, done) {
+    var idx = state.lists.indexOf(list);
+    var entry = moveListToTrash(list);
+    done();
+    showUndo('Lista "' + list.name + '" excluída', function () {
+      restoreTrashEntry(entry.id);
+      var cur = state.lists.indexOf(list);
+      if (cur > -1 && idx > -1 && cur !== idx) {
+        state.lists.splice(cur, 1);
+        state.lists.splice(Math.min(idx, state.lists.length), 0, list);
+        save();
+      }
+      if (currentListId) renderDetail(); else renderHome();
+    });
   }
 
   function restoreTrashEntry(entryId) {
@@ -514,6 +597,8 @@
     if (!g.badges || typeof g.badges !== 'object') g.badges = {};
     g.total = g.total || 0;
     g.listsDone = g.listsDone || 0;
+    if (!g.rewards || typeof g.rewards !== 'object') g.rewards = {};
+    if (!g.rewardShown || typeof g.rewardShown !== 'object') g.rewardShown = {};
     return g;
   }
 
@@ -565,6 +650,12 @@
   }
 
   var toastTimer = null;
+  function hideToast() {
+    var el = document.getElementById('game-toast');
+    if (el) el.classList.remove('show');
+    clearTimeout(toastTimer);
+  }
+
   function showToast(text) {
     var el = document.getElementById('game-toast');
     if (!el) {
@@ -576,6 +667,9 @@
       document.body.appendChild(el);
     }
     el.textContent = text;
+    // se o "Desfazer" está na tela, este aviso sobe pra não ficar em cima dele
+    var undoEl = document.getElementById('undo-toast');
+    el.classList.toggle('above', !!(undoEl && undoEl.classList.contains('show')));
     el.classList.add('show');
     clearTimeout(toastTimer);
     toastTimer = setTimeout(function () { el.classList.remove('show'); }, 2200);
@@ -591,6 +685,9 @@
     justCheckedItemId = item.id;
     var complete = list.items.length > 0 && list.items.every(function (i) { return i.done; });
     if (complete) game.listsDone++;
+    if (complete && game.rewards[list.id] && game.rewardShown[list.id] !== todayStr()) {
+      setTimeout(function () { showReward(list, 0); }, 700);
+    }
     var badge = unlockBadges();
     if (badge) {
       vibrate([20, 40, 20]);
@@ -830,9 +927,256 @@
     document.getElementById('btn-breathe').addEventListener('click', function () { openBreathing(closeModal); });
   }
 
+  // ---------- modelos de lista, perfis de uso e recompensa ----------
+
+  // Passos pequenos e concretos: começar costuma ser a parte mais difícil.
+  var TEMPLATES = [
+    { key: 'manha', name: 'Rotina da manhã', emoji: '🌅', type: 'rotina',
+      items: ['Beber um copo de água', 'Tomar café da manhã', 'Escovar os dentes', 'Trocar de roupa', 'Arrumar a cama', 'Olhar o que tem pra hoje'] },
+    { key: 'noite', name: 'Rotina da noite', emoji: '🌙', type: 'rotina',
+      items: ['Guardar o que ficou fora do lugar', 'Separar a roupa de amanhã', 'Deixar o que preciso levar perto da porta', 'Tomar os remédios, se houver', 'Colocar o celular pra carregar', 'Escovar os dentes'] },
+    { key: 'casa15', name: 'Casa em 15 minutos', emoji: '🧹', type: 'rotina',
+      items: ['Juntar a louça e lavar', 'Recolher a roupa suja', 'Passar um pano na bancada', 'Tirar o lixo', 'Arrumar a mesa ou o sofá'] },
+    { key: 'mercado', name: 'Mercado básico', emoji: '🛒', type: 'lista',
+      items: ['Frutas', 'Verduras e legumes', 'Arroz e feijão', 'Leite e ovos', 'Pão', 'Café', 'Produtos de limpeza'] },
+    { key: 'mala', name: 'Mala de viagem', emoji: '🧳', type: 'lista',
+      items: ['Documentos e carteira', 'Carregador e fone', 'Remédios', 'Roupas (uma por dia)', 'Itens de higiene', 'Chaves de casa'] },
+    { key: 'contas', name: 'Contas e burocracias', emoji: '🧾', type: 'lista',
+      items: ['Pagar as contas do mês', 'Responder os e-mails pendentes', 'Marcar consultas', 'Conferir a agenda da semana'] }
+  ];
+
+  function templateByKey(key) {
+    return TEMPLATES.filter(function (t) { return t.key === key; })[0];
+  }
+
+  function newListFromTemplate(tpl, nameOverride) {
+    var list = createList(nameOverride || tpl.name, tpl.emoji, tpl.type);
+    list.items = tpl.items.map(function (text) { return { id: uid(), text: text, done: false }; });
+    return list;
+  }
+
+  function duplicateList(list) {
+    var copy = createList(list.name + ' (cópia)', list.emoji, list.type);
+    copy.sortOrder = list.sortOrder || 'manual';
+    copy.items = list.items.map(function (i) { return { id: uid(), text: i.text, done: false }; });
+    state.lists.push(copy);
+    save();
+    return copy;
+  }
+
+  // Perfis: só ajustam interruptores que já existem em Ajustes.
+  var PROFILES = [
+    { key: 'foco', emoji: '🎯', title: 'Preciso de ajuda para focar',
+      desc: 'Uma tarefa por vez, "Para agora", incentivos e cronômetro suave.',
+      apply: { enabled: true, today: true, calm: false } },
+    { key: 'calmo', emoji: '🌿', title: 'Quero um ritmo mais tranquilo',
+      desc: 'Sem contagens nem números que pressionam; só frases de incentivo.',
+      apply: { enabled: true, today: true, calm: true } },
+    { key: 'basico', emoji: '✅', title: 'Só o básico',
+      desc: 'Listas e rotinas, sem incentivos nem "Para agora".',
+      apply: { enabled: false, today: false, calm: false } }
+  ];
+
+  function applyProfile(key) {
+    var prof = PROFILES.filter(function (p) { return p.key === key; })[0];
+    if (!prof) return;
+    game.enabled = prof.apply.enabled;
+    game.today = prof.apply.today;
+    game.calm = prof.apply.calm;
+    game.profile = key;
+    saveGame();
+  }
+
+  function profileCardsHtml(selected) {
+    return '<div class="choice-list">' + PROFILES.map(function (p) {
+      return '<button type="button" class="choice-card' + (p.key === selected ? ' selected' : '') + '" data-profile="' + p.key + '">' +
+        '<span class="choice-emoji">' + p.emoji + '</span>' +
+        '<span><strong>' + p.title + '</strong><small>' + p.desc + '</small></span></button>';
+    }).join('') + '</div>';
+  }
+
+  function bindChoiceCards(onPick) {
+    modal.querySelectorAll('.choice-card').forEach(function (el) {
+      el.addEventListener('click', function () {
+        modal.querySelectorAll('.choice-card').forEach(function (o) { o.classList.remove('selected'); });
+        el.classList.add('selected');
+        onPick(el.getAttribute('data-profile'));
+      });
+    });
+  }
+
+  // Escolha de perfil fora do onboarding (Ajustes).
+  function openProfilePicker() {
+    var chosen = game.profile || 'foco';
+    openModal(
+      '<h2>Como você prefere usar o app?</h2>' +
+      '<p class="hint">Isso só liga ou desliga opções que também estão em Ajustes. Dá pra mudar quando quiser.</p>' +
+      profileCardsHtml(chosen) +
+      '<div class="modal-actions">' +
+        '<button id="m-cancel" class="btn btn-secondary">Cancelar</button>' +
+        '<button id="m-profile-save" class="btn btn-primary">Aplicar</button>' +
+      '</div>'
+    );
+    bindChoiceCards(function (k) { chosen = k; });
+    document.getElementById('m-cancel').addEventListener('click', closeModal);
+    document.getElementById('m-profile-save').addEventListener('click', function () {
+      applyProfile(chosen);
+      closeModal();
+      if (currentListId) renderDetail(); else renderHome();
+    });
+  }
+
+  // Primeira abertura: boas-vindas, perfil e modelos. Só em instalação nova.
+  function startOnboarding(done) {
+    var step = 0;
+    var profile = 'foco';
+    var picked = [];
+    var finished = false;
+
+    function dots() {
+      return '<div class="steps" aria-hidden="true">' + [0, 1, 2].map(function (i) {
+        return '<span class="' + (i === step ? 'on' : '') + '"></span>';
+      }).join('') + '</div>';
+    }
+
+    function finish() {
+      if (finished) return;
+      finished = true;
+      applyProfile(profile);
+      picked.forEach(function (key) {
+        var tpl = templateByKey(key);
+        if (tpl) state.lists.push(newListFromTemplate(tpl));
+      });
+      if (picked.length) save();
+      game.onboarded = true;
+      saveGame();
+      closeModal();
+      renderHome();
+    }
+
+    function render() {
+      if (step === 0) {
+        openModal(
+          dots() +
+          '<h2>Bem-vindo(a) 👋</h2>' +
+          '<p class="hint">Um checklist que respeita o seu ritmo. Listas, rotinas que recomeçam todo dia e pequenos incentivos, tudo opcional.</p>' +
+          '<div class="feature-list">' +
+            '<div><span>🎯</span><div><strong>Uma tarefa por vez</strong><small>O modo foco mostra só o próximo passo.</small></div></div>' +
+            '<div><span>🌬️</span><div><strong>Pausas para respirar</strong><small>Um minuto guiado quando a cabeça pesa.</small></div></div>' +
+            '<div><span>🌱</span><div><strong>Progresso sem cobrança</strong><small>Nada zera por um dia difícil.</small></div></div>' +
+          '</div>' +
+          '<button id="m-ob-next" class="btn btn-primary">Começar</button>' +
+          '<button id="m-ob-skip" class="btn btn-secondary">Pular apresentação</button>'
+        );
+        document.getElementById('m-ob-next').addEventListener('click', function () { step = 1; render(); });
+        document.getElementById('m-ob-skip').addEventListener('click', finish);
+      } else if (step === 1) {
+        openModal(
+          dots() +
+          '<h2>Como você prefere usar o app?</h2>' +
+          '<p class="hint">Isso só liga ou desliga opções que também ficam em Ajustes.</p>' +
+          profileCardsHtml(profile) +
+          '<div class="modal-actions">' +
+            '<button id="m-ob-back" class="btn btn-secondary">Voltar</button>' +
+            '<button id="m-ob-next" class="btn btn-primary">Continuar</button>' +
+          '</div>'
+        );
+        bindChoiceCards(function (k) { profile = k; });
+        document.getElementById('m-ob-back').addEventListener('click', function () { step = 0; render(); });
+        document.getElementById('m-ob-next').addEventListener('click', function () { step = 2; render(); });
+      } else {
+        openModal(
+          dots() +
+          '<h2>Quer começar com um modelo?</h2>' +
+          '<p class="hint">Escolha quantos quiser. Você pode editar tudo depois.</p>' +
+          '<div class="chip-row">' + TEMPLATES.map(function (t) {
+            return '<button type="button" class="chip' + (picked.indexOf(t.key) > -1 ? ' selected' : '') + '" data-key="' + t.key + '">' + t.emoji + ' ' + t.name + '</button>';
+          }).join('') + '</div>' +
+          '<div class="modal-actions">' +
+            '<button id="m-ob-back" class="btn btn-secondary">Voltar</button>' +
+            '<button id="m-ob-done" class="btn btn-primary">Concluir</button>' +
+          '</div>'
+        );
+        modal.querySelectorAll('.chip').forEach(function (el) {
+          el.addEventListener('click', function () {
+            var k = el.getAttribute('data-key');
+            var i = picked.indexOf(k);
+            if (i > -1) picked.splice(i, 1); else picked.push(k);
+            el.classList.toggle('selected');
+          });
+        });
+        document.getElementById('m-ob-back').addEventListener('click', function () { step = 1; render(); });
+        document.getElementById('m-ob-done').addEventListener('click', finish);
+      }
+    }
+
+    // fechar de qualquer jeito (fora da folha, arrastando) conta como "pular"
+    onModalCloseOnce = function () { if (!finished) { finished = true; game.onboarded = true; saveGame(); } done(); };
+    render();
+  }
+
+  // Recompensa pessoal ao concluir uma lista (fica só neste aparelho).
+  var REWARD_IDEAS = ['☕ Um café', '🎵 Uma música favorita', '🚶 Uma caminhada curta', '🍫 Um docinho', '📺 Um episódio', '🛁 Um banho demorado'];
+
+  function openRewardEditor(list) {
+    var current = game.rewards[list.id] || '';
+    openModal(
+      '<h2>Recompensa ao concluir</h2>' +
+      '<p class="hint">Quando você terminar "' + escapeHtml(list.name) + '", o app lembra do seu combinado. Algo pequeno e seu funciona melhor do que pontos.</p>' +
+      '<input id="m-reward-text" type="text" maxlength="60" placeholder="Ex: ☕ Um café sem pressa">' +
+      '<div class="chip-row">' + REWARD_IDEAS.map(function (r) { return '<button type="button" class="chip" data-idea="' + r + '">' + r + '</button>'; }).join('') + '</div>' +
+      '<div class="modal-actions">' +
+        '<button id="m-reward-back" class="btn btn-secondary">Voltar</button>' +
+        '<button id="m-reward-save" class="btn btn-primary">Salvar</button>' +
+      '</div>' +
+      (current ? '<button id="m-reward-remove" class="btn btn-danger">Remover recompensa</button>' : '')
+    );
+    var input = document.getElementById('m-reward-text');
+    input.value = current;
+    modal.querySelectorAll('[data-idea]').forEach(function (el) {
+      el.addEventListener('click', function () { input.value = el.getAttribute('data-idea'); });
+    });
+    document.getElementById('m-reward-back').addEventListener('click', function () { openListMenu(list); });
+    document.getElementById('m-reward-save').addEventListener('click', function () {
+      var v = input.value.trim();
+      if (v) game.rewards[list.id] = v; else delete game.rewards[list.id];
+      saveGame();
+      openListMenu(list);
+    });
+    var rm = document.getElementById('m-reward-remove');
+    if (rm) rm.addEventListener('click', function () {
+      delete game.rewards[list.id];
+      saveGame();
+      openListMenu(list);
+    });
+  }
+
+  function showReward(list, tries) {
+    var text = game.rewards[list.id];
+    if (!text) return;
+    if (!backdrop.classList.contains('hidden')) {
+      if ((tries || 0) < 4) setTimeout(function () { showReward(list, (tries || 0) + 1); }, 500);
+      return;
+    }
+    game.rewardShown[list.id] = todayStr();
+    saveGame();
+    hideToast(); // o aviso de conquista não pode cobrir a recompensa
+    openModal(
+      '<div class="reward-card">' +
+        '<div class="reward-big">🎉</div>' +
+        '<h2>Lista concluída!</h2>' +
+        '<p class="hint">Sua recompensa combinada:</p>' +
+        '<div id="reward-text" class="reward-text"></div>' +
+      '</div>' +
+      '<button id="m-reward-ok" class="btn btn-primary">Vou aproveitar ✓</button>'
+    );
+    document.getElementById('reward-text').textContent = text;
+    document.getElementById('m-reward-ok').addEventListener('click', closeModal);
+  }
+
   // Convite gentil na primeira abertura do dia (nunca cobra nem conta o que faltou ontem).
   function maybeGreet() {
-    if (!game.enabled || game.greetedOn === todayStr()) return;
+    if (isNewInstall || !game.enabled || game.greetedOn === todayStr()) return;
     var pending = 0;
     state.lists.forEach(function (l) {
       if (l.type === 'rotina') pending += l.items.filter(function (i) { return !i.done; }).length;
@@ -989,8 +1333,7 @@
       }).catch(function () { alert('Não foi possível excluir agora. Verifique a conexão.'); });
       return;
     }
-    moveListToTrash(list);
-    done();
+    trashListWithUndo(list, done);
   }
 
   // Cada lista ganha um tom próprio (derivado do id, sem guardar nada): ajuda a
@@ -1210,8 +1553,7 @@
       }
 
       row.querySelector('.delete').addEventListener('click', function () {
-        moveItemToTrash(list, item);
-        renderDetail();
+        trashItemWithUndo(list, item);
       });
 
       container.appendChild(row);
@@ -1331,9 +1673,14 @@
     backdrop.classList.remove('hidden');
   }
 
+  var onModalCloseOnce = null;
+
   function closeModal() {
     backdrop.classList.add('hidden');
     modal.innerHTML = '';
+    var hook = onModalCloseOnce;
+    onModalCloseOnce = null;
+    if (hook) hook();
   }
 
   backdrop.addEventListener('click', function (e) {
@@ -1373,8 +1720,15 @@
     var chosenEmoji = EMOJI_CHOICES[0];
     var chosenType = 'lista';
 
+    var chosenTemplate = null;
+
     openModal(
       '<h2>Nova lista</h2>' +
+      '<div><div class="field-label">Começar de um modelo</div>' +
+        '<div class="chip-row scroll" id="m-templates">' + TEMPLATES.map(function (t) {
+          return '<button type="button" class="chip" data-key="' + t.key + '">' + t.emoji + ' ' + t.name + '</button>';
+        }).join('') + '</div>' +
+        '<p id="m-template-note" class="hint hidden" style="margin:8px 0 0;"></p></div>' +
       '<label>Nome<input id="m-name" type="text" placeholder="Ex: Academia" maxlength="40"></label>' +
       '<label>Ícone<div id="m-emojis" class="emoji-row"></div></label>' +
       '<label>Tipo' +
@@ -1411,11 +1765,40 @@
       });
     });
 
+    function paintChoices() {
+      emojiRow.querySelectorAll('.emoji-choice').forEach(function (el) { el.classList.toggle('selected', el.textContent === chosenEmoji); });
+      modal.querySelectorAll('.type-choice').forEach(function (o) { o.classList.toggle('selected', o.dataset.type === chosenType); });
+    }
+    modal.querySelectorAll('#m-templates .chip').forEach(function (chip) {
+      chip.addEventListener('click', function () {
+        var key = chip.getAttribute('data-key');
+        var note = document.getElementById('m-template-note');
+        modal.querySelectorAll('#m-templates .chip').forEach(function (c) { c.classList.remove('selected'); });
+        if (chosenTemplate && chosenTemplate.key === key) {
+          chosenTemplate = null;
+          note.classList.add('hidden');
+          return;
+        }
+        chosenTemplate = templateByKey(key);
+        chip.classList.add('selected');
+        document.getElementById('m-name').value = chosenTemplate.name;
+        chosenEmoji = chosenTemplate.emoji;
+        chosenType = chosenTemplate.type;
+        paintChoices();
+        note.textContent = chosenTemplate.items.length + ' itens já vêm prontos; você edita depois.';
+        note.classList.remove('hidden');
+      });
+    });
+
     document.getElementById('m-cancel').addEventListener('click', closeModal);
     document.getElementById('m-create').addEventListener('click', function () {
       var name = document.getElementById('m-name').value.trim();
       if (!name) return;
-      state.lists.push(createList(name, chosenEmoji, chosenType));
+      var created = createList(name, chosenEmoji, chosenType);
+      if (chosenTemplate) {
+        created.items = chosenTemplate.items.map(function (text) { return { id: uid(), text: text, done: false }; });
+      }
+      state.lists.push(created);
       save();
       closeModal();
       renderHome();
@@ -1505,6 +1888,12 @@
         '<div class="stack"><button id="m-add-time" class="btn btn-secondary small-btn">+ Adicionar horário</button></div>' +
         '<p class="hint">Pra receber esse aviso mesmo com o app fechado, ative "Notificações" em Ajustes. Não avisa se a lista já estiver toda feita. Esse lembrete é só seu; cada pessoa na lista escolhe o próprio horário.</p>' +
       '</div>';
+    html +=
+      '<div class="settings-label">Incentivo</div>' +
+      '<div class="settings-group">' +
+        '<div class="settings-row"><span>Recompensa ao concluir</span><button id="m-reward" class="btn btn-secondary">' +
+          (game.rewards[list.id] ? escapeHtml(game.rewards[list.id].slice(0, 18)) : 'Definir') + '</button></div>' +
+      '</div>';
     if (isMeta) {
       html +=
         '<div class="settings-label">Lista</div>' +
@@ -1524,7 +1913,8 @@
     } else if (isMeta) {
       html += '<button id="m-members-local" class="btn btn-secondary">👥 Compartilhar com pessoas</button>';
     }
-    html += '<button id="m-share" class="btn btn-secondary">Copiar como texto</button></div></div>';
+    html += '<button id="m-share" class="btn btn-secondary">Copiar como texto</button>' +
+      '<button id="m-duplicate" class="btn btn-secondary">Duplicar lista</button></div></div>';
     if (isItems) {
       html +=
         '<div class="settings-label">Itens</div>' +
@@ -1620,31 +2010,42 @@
     });
 
     on('m-share', function () { shareList(list); });
+    on('m-reward', function () { openRewardEditor(list); });
+    on('m-duplicate', function () {
+      var copy = duplicateList(list);
+      closeModal();
+      showHome();
+      showToast('Lista duplicada: ' + copy.name);
+    });
 
-    on('m-check-all', function () {
-      list.items.forEach(function (i) { i.done = true; });
+    function setAllDone(value, label) {
+      var before = {};
+      list.items.forEach(function (i) { before[i.id] = i.done; i.done = value; });
       save();
       closeModal();
       renderDetail();
-    });
-
-    on('m-uncheck-all', function () {
-      list.items.forEach(function (i) { i.done = false; });
-      save();
-      closeModal();
-      renderDetail();
-    });
+      showUndo(label, function () {
+        list.items.forEach(function (i) { if (i.id in before) i.done = before[i.id]; });
+        save();
+        if (currentListId === list.id) renderDetail();
+      });
+    }
+    on('m-check-all', function () { setAllDone(true, 'Todos marcados'); });
+    on('m-uncheck-all', function () { setAllDone(false, 'Todos desmarcados'); });
 
     on('m-clear', function () {
-      list.items.filter(function (i) { return i.done; }).forEach(function (i) {
-        moveItemToTrash(list, i);
-      });
+      var removed = [];
+      list.items.forEach(function (i, idx) { if (i.done) removed.push({ item: i, idx: idx }); });
+      if (!removed.length) { closeModal(); return; }
+      removed.forEach(function (r) { r.entryId = moveItemToTrash(list, r.item).id; });
       closeModal();
       renderDetail();
+      showUndo(removed.length === 1 ? '1 item concluído removido' : removed.length + ' itens concluídos removidos', function () {
+        undoItemsTrash(list, removed);
+      });
     });
 
     on('m-delete', function () {
-      if (!list.role && !confirm('Excluir a lista "' + list.name + '"? Fica na lixeira por 7 dias, dá pra restaurar.')) return;
       closeModal();
       removeListWithConfirm(list, showHome);
     });
@@ -1774,6 +2175,7 @@
       '<h2>Ajustes</h2>' +
       '<div class="settings-label">Foco e bem-estar</div>' +
       '<div class="settings-group">' +
+      '<div class="settings-row"><span>Perfil de uso</span><button id="m-profile" class="btn btn-secondary">Escolher</button></div>' +
       '<div class="settings-row"><span>Progresso e feedback ao marcar</span><button id="m-game-toggle" class="switch" role="switch" aria-label="Progresso e feedback ao marcar" aria-checked="' + (game.enabled ? 'true' : 'false') + '"><span></span></button></div>' +
       '<div class="settings-row"><span>Modo tranquilo (sem contagens nem números)</span><button id="m-calm-toggle" class="switch" role="switch" aria-label="Modo tranquilo (sem contagens nem números)" aria-checked="' + (game.calm ? 'true' : 'false') + '"><span></span></button></div>' +
       '<div class="settings-row"><span>“Para agora” na home (3 próximas tarefas)</span><button id="m-today-toggle" class="switch" role="switch" aria-label="“Para agora” na home (3 próximas tarefas)" aria-checked="' + (game.today !== false ? 'true' : 'false') + '"><span></span></button></div>' +
@@ -1841,6 +2243,7 @@
         if (currentListId) renderDetail(); else renderHome();
       });
     }
+    document.getElementById('m-profile').addEventListener('click', openProfilePicker);
     bindSwitch('m-game-toggle', function () { game.enabled = !game.enabled; });
 
     bindSwitch('m-calm-toggle', function () { game.calm = !game.calm; });
@@ -2931,6 +3334,17 @@
   maybeGreet();
   cloudTick();
   startCloudPolling();
-  bootAccountFlow();
+  (function () {
+    var invite = false;
+    try {
+      invite = !!new URLSearchParams(location.search).get('convite') || !!localStorage.getItem(PENDING_INVITE_KEY);
+    } catch (e) {}
+    if (isNewInstall && !game.onboarded && !invite) {
+      startOnboarding(bootAccountFlow);
+    } else {
+      if (isNewInstall) { game.onboarded = true; saveGame(); }
+      bootAccountFlow();
+    }
+  })();
   if (isAppLockEnabled()) { showLockScreen(); tryUnlock(); }
 })();

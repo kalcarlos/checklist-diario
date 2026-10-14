@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<title>Checklist Diário</title>
+
+<!-- PWA / iOS home screen -->
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0a84ff">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Checklist">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" href="icons/favicon-32.png">
+
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<div id="app">
+
+  <!-- Tela: lista de listas -->
+  <section id="screen-home" class="screen">
+    <header class="topbar">
+      <button id="btn-trash" class="icon-btn" aria-label="Lixeira">🗑️</button>
+      <h1>Checklist Diário</h1>
+      <button id="btn-join" class="icon-btn" aria-label="Entrar com convite">🤝</button>
+      <button id="btn-search" class="icon-btn" aria-label="Buscar">🔍</button>
+      <button id="btn-settings" class="icon-btn" aria-label="Ajustes">⚙️</button>
+    </header>
+    <div id="lists-container" class="lists-container"></div>
+    <button id="btn-new-list" class="fab" aria-label="Nova lista">+</button>
+  </section>
+
+  <!-- Tela: detalhe de uma lista -->
+  <section id="screen-detail" class="screen hidden">
+    <header class="topbar">
+      <button id="btn-back" class="icon-btn" aria-label="Voltar">←</button>
+      <h1 id="detail-title">Lista</h1>
+      <button id="btn-list-menu" class="icon-btn" aria-label="Opções">⋯</button>
+    </header>
+    <p id="detail-hint" class="hint"></p>
+    <div id="item-filter" class="filter-bar">
+      <button class="filter-choice" data-filter="all">Todos</button>
+      <button class="filter-choice" data-filter="done">Marcados</button>
+      <button class="filter-choice" data-filter="pending">Não marcados</button>
+    </div>
+    <ul id="items-container" class="items-container"></ul>
+    <div id="add-suggestion" class="suggestion-bar hidden"></div>
+    <form id="add-item-form" class="add-item-form">
+      <textarea id="add-item-input" rows="1" placeholder="Adicionar item…" autocomplete="off"></textarea>
+      <button type="submit" class="icon-btn">➕</button>
+    </form>
+  </section>
+
+</div>
+
+<!-- Modal genérico (nova lista / editar lista / ajustes) -->
+<div id="modal-backdrop" class="modal-backdrop hidden">
+  <div id="modal" class="modal"></div>
+</div>
+
+<!-- Bloqueio do app (Face ID / Touch ID / senha do aparelho) -->
+<div id="lock-screen" class="lock-screen hidden">
+  <div class="lock-icon">🔒</div>
+  <p>Checklist Diário</p>
+  <button id="btn-unlock" class="btn btn-primary" style="max-width:220px;">Desbloquear</button>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
