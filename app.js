@@ -635,9 +635,11 @@
       if (candidates.length === 0) { skipped = []; candidates = pending; }
       var item = candidates[0];
       openModal(
-        '<p class="hint" style="margin:0;">' + (pending.length === 1 ? 'Falta só 1' : 'Faltam ' + pending.length) + '</p>' +
-        '<div id="focus-text" class="focus-text"></div>' +
+        '<p class="hint" style="margin:0;">' + (pending.length === 1 ? 'Falta só 1' : 'Faltam ' + pending.length) +
+          ' · toque no texto para aumentar/diminuir a letra</p>' +
+        '<div id="focus-text" class="focus-text' + (game.focusLarge ? ' large' : '') + '"></div>' +
         '<button id="m-focus-done" class="btn btn-primary">Feito ✓</button>' +
+        '<button id="m-focus-split" class="btn btn-secondary">Dividir em passos menores</button>' +
         (pending.length > 1 ? '<button id="m-focus-skip" class="btn btn-secondary">Pular por agora</button>' : '') +
         '<button id="m-cancel" class="btn btn-secondary">Sair do foco</button>'
       );
@@ -650,11 +652,59 @@
         justCheckedItemId = null;
         render();
       });
+      document.getElementById('m-focus-split').addEventListener('click', function () {
+        openSplitItem(list, item, render);
+      });
+      document.getElementById('focus-text').addEventListener('click', function () {
+        game.focusLarge = !game.focusLarge;
+        saveGame();
+        this.classList.toggle('large', game.focusLarge);
+      });
       var skipBtn = document.getElementById('m-focus-skip');
       if (skipBtn) skipBtn.addEventListener('click', function () { skipped.push(item.id); render(); });
       document.getElementById('m-cancel').addEventListener('click', closeModal);
     }
     render();
+  }
+
+  // Convite gentil na primeira abertura do dia (nunca cobra nem conta o que faltou ontem).
+  function maybeGreet() {
+    if (!game.enabled || game.greetedOn === todayStr()) return;
+    var pending = 0;
+    state.lists.forEach(function (l) {
+      if (l.type === 'rotina') pending += l.items.filter(function (i) { return !i.done; }).length;
+    });
+    game.greetedOn = todayStr();
+    saveGame();
+    if (pending === 0) return;
+    var h = new Date().getHours();
+    var hi = h < 12 ? 'Bom dia!' : (h < 18 ? 'Boa tarde!' : 'Boa noite!');
+    showToast(hi + ' ' + (pending === 1 ? 'Tem 1 tarefa hoje.' : 'Tem ' + pending + ' tarefas hoje.') + ' Que tal começar por uma? 🌱');
+  }
+
+  // Troca uma tarefa grande por passos menores (um por linha), na mesma posição.
+  // O item original vai pra lixeira, então dá pra recuperar.
+  function openSplitItem(list, item, back) {
+    openModal(
+      '<h2>Dividir em passos</h2>' +
+      '<p class="hint" style="margin:0;">Escreva um passo por linha. Passos pequenos e concretos são mais fáceis de começar.</p>' +
+      '<textarea id="m-split-text" rows="5" placeholder="Ex.:&#10;Juntar a louça&#10;Lavar os copos&#10;Lavar as panelas"></textarea>' +
+      '<div class="modal-actions"><button id="m-split-cancel" class="btn btn-secondary">Voltar</button>' +
+      '<button id="m-split-save" class="btn btn-primary">Dividir</button></div>'
+    );
+    document.getElementById('m-split-cancel').addEventListener('click', back);
+    document.getElementById('m-split-save').addEventListener('click', function () {
+      var steps = document.getElementById('m-split-text').value.split('\n')
+        .map(function (t) { return t.trim(); }).filter(Boolean).slice(0, 15);
+      if (steps.length < 2) { alert('Escreva pelo menos 2 passos, um por linha.'); return; }
+      var idx = list.items.findIndex(function (i) { return i.id === item.id; });
+      var newItems = steps.map(function (t) { return { id: uid(), text: t, done: false }; });
+      moveItemToTrash(list, item);
+      Array.prototype.splice.apply(list.items, [Math.max(0, idx), 0].concat(newItems));
+      save();
+      renderDetail();
+      back();
+    });
   }
 
   function renderGameSummary() {
@@ -2613,6 +2663,7 @@
 
   load();
   showHome();
+  maybeGreet();
   cloudTick();
   startCloudPolling();
   bootAccountFlow();

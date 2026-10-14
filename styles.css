@@ -621,3 +621,16 @@ body {
   padding: 24px 8px;
   overflow-wrap: anywhere;
 }
+
+.focus-text { cursor: pointer; }
+.focus-text.large { font-size: 30px; line-height: 1.25; }
+.modal textarea {
+  background: var(--card-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  color: var(--text);
+  font-size: 16px;
+  font-family: inherit;
+  resize: vertical;
+}
