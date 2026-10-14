@@ -12,7 +12,7 @@
     } catch (e) {}
   }
   var P = window.CDPure;
-  var dayKey = P.dayKey, plain = P.plain, parseWhen = P.parseWhen, findLinks = P.findLinks;
+  var dayKey = P.dayKey, rhythm = P.rhythm, plain = P.plain, parseWhen = P.parseWhen, findLinks = P.findLinks;
 
   var STORAGE_KEY = 'checklist-diario:v1';
   var SYNC_CODE_KEY = 'checklist-diario:syncCode';
@@ -1934,6 +1934,28 @@
     document.getElementById('btn-game-history').addEventListener('click', openGameHistory);
   }
 
+  var DOW_PLURAL = ['domingos', 'segundas', 'terças', 'quartas', 'quintas', 'sextas', 'sábados'];
+
+  // "Seu ritmo": só no aparelho, sem comparar com ninguém; no modo tranquilo, sem números.
+  function rhythmHtml() {
+    var r = rhythm(game.days, daysAgo(0));
+    var lines = [];
+    if (!r.active30) {
+      lines.push('Sem registros nos últimos 30 dias. Tudo bem: dá para recomeçar com uma tarefa pequena.');
+    } else {
+      if (r.bestDow !== null) lines.push('Você costuma render mais nas ' + DOW_PLURAL[r.bestDow] + '.');
+      if (!game.calm) lines.push('Nos últimos 30 dias: ' + r.active30 + (r.active30 === 1 ? ' dia ativo' : ' dias ativos') + ', média de ' + String(r.avgPerActive).replace('.', ',') + (r.avgPerActive === 1 ? ' item' : ' itens') + ' por dia ativo.');
+      if (r.returns) lines.push(game.calm ? 'Você já retomou depois de pausas. Recomeçar também é progresso.' : 'Você retomou ' + r.returns + (r.returns === 1 ? ' vez' : ' vezes') + ' depois de uma pausa. Recomeçar também é progresso.');
+    }
+    var max = Math.max.apply(null, r.byDow) || 1;
+    var bars = r.byDow.map(function (v, i) {
+      return '<span class="rt-col' + (i === r.bestDow ? ' best' : '') + '"><span class="rt-bar" style="height:' + Math.round((v / max) * 100) + '%"></span><span class="rt-lbl">' + DOW_LETTER[i] + '</span></span>';
+    }).join('');
+    return '<h3 style="margin:4px 0 0;font-size:15px;">Seu ritmo</h3>' +
+      (r.active30 ? '<div class="rt-chart" role="img" aria-label="Itens feitos por dia da semana nos últimos 90 dias">' + bars + '</div>' : '') +
+      '<p class="hint rt-text" style="margin:0;">' + lines.map(escapeHtml).join(' ') + '</p>';
+  }
+
   function openGameHistory() {
     var WEEKS = 12;
     var today = daysAgo(0);
@@ -1959,6 +1981,7 @@
         ' · sequência atual: ' + currentStreak() + '</p>' +
       '<p class="hint" style="margin:0;">Um dia sem marcar nada não zera a sequência (você tem um perdão a cada 7 dias). ' +
         'Cada quadradinho é um dia; quanto mais escuro, mais itens feitos.</p>' +
+      rhythmHtml() +
       '<h3 style="margin:4px 0 0;font-size:15px;">Conquistas</h3>' +
       '<div class="badges">' + badgesHtml + '</div>' +
       '<button id="m-open-review" class="btn btn-secondary">📋 Revisão da semana</button>' +
