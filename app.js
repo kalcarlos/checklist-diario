@@ -441,7 +441,7 @@
     if (el) el.classList.remove('show');
   }
 
-  function showUndo(message, undoFn) {
+  function showUndo(message, undoFn, label) {
     var el = document.getElementById('undo-toast');
     if (!el) {
       el = document.createElement('div');
@@ -451,7 +451,8 @@
       el.setAttribute('aria-live', 'polite');
       document.body.appendChild(el);
     }
-    el.innerHTML = '<span class="undo-msg"></span><button type="button" class="undo-btn">Desfazer</button>';
+    el.innerHTML = '<span class="undo-msg"></span><button type="button" class="undo-btn"></button>';
+    el.querySelector('.undo-btn').textContent = label || 'Desfazer';
     el.querySelector('.undo-msg').textContent = message;
     el.querySelector('.undo-btn').addEventListener('click', function () {
       hideUndo();
@@ -2555,13 +2556,21 @@
     var text = input.value.trim();
     if (!text) return;
     var list = getList(currentListId);
-    list.items.push({ id: uid(), text: text, done: false });
+    var newItem = { id: uid(), text: text, done: false };
+    list.items.push(newItem);
     learnFromText(text, list.id);
     input.value = '';
     autoGrow(input);
     hideAddSuggestion();
     save();
     renderDetail();
+    var w = parseWhen(text);
+    if (w) {
+      showUndo('Lembrar ' + remindWhen(w) + '?', function () {
+        setTaskReminder(list, newItem, w.date, w.time);
+        if (currentListId === list.id) renderDetail();
+      }, 'Lembrar');
+    }
   });
 
   document.getElementById('btn-back').addEventListener('click', showHome);
@@ -2650,12 +2659,14 @@
       list = getList(listId);
     }
     if (!list || !canEditItems(list)) return null;
-    lines.forEach(function (t) {
-      list.items.push({ id: uid(), text: t, done: false });
+    var added = lines.map(function (t) {
+      var it = { id: uid(), text: t, done: false };
+      list.items.push(it);
       learnFromText(t, list.id);
+      return it;
     });
     save();
-    return { list: list, count: lines.length };
+    return { list: list, count: lines.length, items: added, lines: lines };
   }
 
   // index.html antigo em cache não tem o botão: cria na hora, junto do "+".
@@ -2703,6 +2714,21 @@
       msg.textContent = (res.count > 1 ? res.count + ' anotações guardadas em ' : 'Guardado em ') + res.list.emoji + ' ' + res.list.name + '. Pode anotar mais.';
       renderHome();
       inbox = findInbox();
+      var w = res.count === 1 ? parseWhen(res.lines[0]) : null;
+      if (w) {
+        var rb = document.createElement('button');
+        rb.type = 'button'; rb.className = 'chip'; rb.id = 'm-cap-remind';
+        rb.textContent = '🔔 Lembrar ' + remindWhen(w);
+        rb.addEventListener('click', function () {
+          setTaskReminder(res.list, res.items[0], w.date, w.time);
+          rb.remove();
+          msg.textContent = 'Lembrete criado para ' + remindWhen(w) + '. Pode anotar mais.';
+          renderHome();
+          ta.focus();
+        });
+        msg.appendChild(document.createTextNode(' '));
+        msg.appendChild(rb);
+      }
       ta.focus();
     }
     document.getElementById('m-cap-save').addEventListener('click', saveCapture);
@@ -4178,6 +4204,36 @@
     var outputArray = new Uint8Array(rawData.length);
     for (var i = 0; i < rawData.length; i++) outputArray[i] = rawData.charCodeAt(i);
     return outputArray;
+  }
+
+  // ---------- lembrete a partir do texto ("ligar pro dentista amanhã 10h") ----------
+
+  var WEEKDAYS_PT = { domingo: 0, segunda: 1, terca: 2, quarta: 3, quinta: 4, sexta: 5, sabado: 6 };
+
+  function plain(t) { return String(t).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, ''); }
+
+  // Só sugere quando há uma HORA clara (10h, 10h30, 14:30, "as 9"). Número solto não conta.
+  function parseWhen(text, now) {
+    now = now || new Date();
+    var t = ' ' + plain(text) + ' ';
+    var m = t.match(/[\s(](\d{1,2})h(\d{2})?(?=[\s.,;!?)]|$)/) || t.match(/[\s(](\d{1,2}):(\d{2})(?=[\s.,;!?)]|$)/) || t.match(/[\s(]as\s+(\d{1,2})()(?=[\s.,;!?)]|$)/);
+    if (!m) return null;
+    var h = parseInt(m[1], 10), min = m[2] ? parseInt(m[2], 10) : 0;
+    if (h > 23 || min > 59) return null;
+    if (/\b(da tarde|da noite)\b/.test(t) && h < 12) h += 12;
+    var offset = null;
+    if (/\bdepois de amanha\b/.test(t)) offset = 2;
+    else if (/\bamanha\b/.test(t)) offset = 1;
+    else if (/\bhoje\b/.test(t)) offset = 0;
+    else {
+      var wd = t.match(/\b(domingo|segunda|terca|quarta|quinta|sexta|sabado)(-feira)?\b/);
+      if (wd) { offset = (WEEKDAYS_PT[wd[1]] - now.getDay() + 7) % 7 || 7; }
+    }
+    var base = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    var when = function (off) { var d = new Date(base.getFullYear(), base.getMonth(), base.getDate() + off, h, min); return d; };
+    var d = offset === null ? (when(0) > now ? when(0) : when(1)) : when(offset);
+    if (d <= now) return null;
+    return { date: dayKey(d), time: String(h).padStart(2, '0') + ':' + String(min).padStart(2, '0') };
   }
 
   // ---------- lembrete por tarefa ----------
