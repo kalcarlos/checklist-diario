@@ -20,3 +20,11 @@ jobs:
         run: npx playwright install --with-deps chromium
       - name: Rodar os testes
         run: npm test
+      - name: Testes do servidor (lógica)
+        working-directory: push-server
+        run: |
+          npm ci
+          npm run test:worker
+      - name: Testes do servidor (Worker real, local)
+        working-directory: push-server
+        run: npm run e2e

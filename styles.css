@@ -1027,3 +1027,11 @@ svg.i.sm { width: 18px; height: 18px; }
 /* cooperativo */
 .coop-line { margin-top: var(--s-2); font-size: var(--fs-sm); font-weight: 600; color: var(--text-dim); }
 .chip-mini.done-by { color: var(--text); background: var(--done-soft); }
+
+/* lembrete por tarefa */
+.remind-box { display: flex; flex-wrap: wrap; gap: var(--s-2); align-items: flex-end; padding: var(--s-3); border-radius: var(--r-md, 12px); background: var(--surface-2, var(--surface)); }
+.remind-box.hidden { display: none; }
+.remind-box label { display: flex; flex-direction: column; gap: 4px; font-size: 0.8125rem; color: var(--text-2, var(--text)); }
+.remind-box input { font: inherit; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface); color: var(--text); min-height: 44px; }
+.remind-btns { display: flex; gap: var(--s-2); flex-basis: 100%; }
+.remind-hint { flex-basis: 100%; margin: 0; }

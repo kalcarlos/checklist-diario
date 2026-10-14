@@ -608,6 +608,7 @@
     if (!g.sound || typeof g.sound !== 'object') g.sound = { on: false, kind: 'chuva', vol: 50 };
     if (!g.doneLists || typeof g.doneLists !== 'object') g.doneLists = {};
     if (!g.reviews || typeof g.reviews !== 'object') g.reviews = {};
+    if (!g.taskReminders || typeof g.taskReminders !== 'object') g.taskReminders = {};
     return g;
   }
 
@@ -616,6 +617,7 @@
     Object.keys(game.days).forEach(function (k) { if (k < cutoff) delete game.days[k]; });
     Object.keys(game.doneLists || {}).forEach(function (k) { if (k < cutoff) delete game.doneLists[k]; });
     try { localStorage.setItem(GAME_KEY, JSON.stringify(game)); } catch (e) {}
+    scheduleProgressSync();
   }
 
   function daysAgo(n) {
@@ -2233,6 +2235,8 @@
       if (item.done && item.doneBy && isSharedList(list)) chips.push('<span class="chip-mini done-by">✓ ' + escapeHtml(doerName(item.doneBy)) + '</span>');
       if (item.note) chips.push('<span class="chip-mini">📝 nota' + (findLinks(item.note).length ? ' · link' : '') + '</span>');
       if (snoozed) chips.push('<span class="chip-mini warn">⏰ volta ' + snoozeWhen(item.snoozeUntil) + '</span>');
+      var remind = !item.done && getTaskReminder(list, item);
+      if (remind) chips.push('<span class="chip-mini">🔔 ' + remindWhen(remind) + '</span>');
       if (isPicked(list, item)) chips.push('<span class="chip-mini star">⭐ prioridade de hoje</span>');
 
       row.innerHTML =
@@ -2349,9 +2353,17 @@
       if (!item.done) {
         html += '<div class="panel-actions">' +
           '<button type="button" class="chip" data-act="pick">' + (isPicked(list, item) ? '⭐ Tirar das prioridades' : '⭐ Prioridade de hoje') + '</button>' +
+          '<button type="button" class="chip" data-act="remind">' + (getTaskReminder(list, item) ? '🔔 Lembrete ' + remindWhen(getTaskReminder(list, item)) : '🔔 Lembrar') + '</button>' +
           (isSnoozed(item)
             ? '<button type="button" class="chip" data-act="unsnooze">↩︎ Trazer de volta hoje</button>'
             : '<button type="button" class="chip" data-act="snooze">⏰ Adiar</button>') +
+        '</div>' +
+        '<div class="remind-box hidden">' +
+          '<label>Dia <input type="date" class="remind-date"></label>' +
+          '<label>Hora <input type="time" class="remind-time"></label>' +
+          '<div class="remind-btns"><button type="button" class="btn btn-primary remind-save">Salvar lembrete</button>' +
+          (getTaskReminder(list, item) ? '<button type="button" class="btn btn-secondary remind-clear">Remover</button>' : '') + '</div>' +
+          '<p class="hint remind-hint"></p>' +
         '</div>' +
         '<div class="snooze-options hidden">' +
           '<button type="button" class="chip" data-days="1">Amanhã</button>' +
@@ -2422,6 +2434,33 @@
     if (pick) pick.addEventListener('click', function () { togglePick(list, item); renderDetail(); });
     var un = panel.querySelector('[data-act="unsnooze"]');
     if (un) un.addEventListener('click', function () { delete item.snoozeUntil; save(); renderDetail(); });
+    var rm = panel.querySelector('[data-act="remind"]');
+    if (rm) {
+      var box = panel.querySelector('.remind-box');
+      rm.addEventListener('click', function () {
+        box.classList.toggle('hidden');
+        if (box.classList.contains('hidden')) return;
+        var cur = getTaskReminder(list, item);
+        var d = new Date(Date.now() + 3600000);
+        box.querySelector('.remind-date').value = cur ? cur.date : dayKey(d);
+        box.querySelector('.remind-time').value = cur ? cur.time : String(d.getHours()).padStart(2, '0') + ':00';
+        var hint = box.querySelector('.remind-hint');
+        hint.textContent = pushFeatures && pushFeatures.indexOf('task-reminders') < 0
+          ? 'O servidor ainda não tem essa função; o aviso só chega depois da atualização dele.'
+          : (!pushSupported() || !isStandalone()
+            ? 'Para receber o aviso, ative as notificações em Ajustes (com o app na Tela de Início).'
+            : 'Você recebe uma notificação nesse horário.');
+      });
+      box.querySelector('.remind-save').addEventListener('click', function () {
+        var date = box.querySelector('.remind-date').value, time = box.querySelector('.remind-time').value;
+        if (!date || !time) { showToast('Escolha o dia e a hora.'); return; }
+        if (new Date(date + 'T' + time + ':00').getTime() <= Date.now()) { showToast('Esse horário já passou.'); return; }
+        setTaskReminder(list, item, date, time);
+        renderDetail();
+      });
+      var rc = box.querySelector('.remind-clear');
+      if (rc) rc.addEventListener('click', function () { clearTaskReminder(list, item); renderDetail(); });
+    }
     var sn = panel.querySelector('[data-act="snooze"]');
     if (sn) sn.addEventListener('click', function () { panel.querySelector('.snooze-options').classList.toggle('hidden'); });
     panel.querySelectorAll('[data-days]').forEach(function (el) {
@@ -3068,6 +3107,7 @@
       '<div class="settings-group">' +
       '<div class="settings-row"><span>Notificações</span><button id="m-push-toggle" class="btn btn-secondary">…</button></div>' +
       '<p id="m-push-status" class="hint"></p>' +
+      '<div class="settings-row"><span>Silenciar lembretes hoje</span><button id="m-mute-toggle" class="switch" role="switch" aria-label="Silenciar lembretes hoje" aria-checked="' + (isMutedToday() ? 'true' : 'false') + '"><span></span></button></div>' +
       '</div>' +
       '<div class="settings-label">Conta e nuvem</div>' +
       '<div class="settings-group">' +
@@ -3130,6 +3170,13 @@
     document.getElementById('m-profile').addEventListener('click', openProfilePicker);
     bindSwitch('m-game-toggle', function () { game.enabled = !game.enabled; });
 
+    document.getElementById('m-mute-toggle').addEventListener('click', function () {
+      game.muteDate = isMutedToday() ? null : todayStr();
+      saveGame();
+      this.setAttribute('aria-checked', isMutedToday() ? 'true' : 'false');
+      clearTimeout(reminderSyncTimer);
+      syncPushSubscription();
+    });
     bindSwitch('m-calm-toggle', function () { game.calm = !game.calm; });
     bindSwitch('m-today-toggle', function () { game.today = game.today === false; });
 
@@ -3200,6 +3247,69 @@
     a.click();
     document.body.removeChild(a);
     setTimeout(function () { URL.revokeObjectURL(url); }, 5000);
+  }
+
+  // ---------- progresso sincronizado entre aparelhos (opcional) ----------
+  // Só contagens e marcas vão pra conta; nenhum texto de tarefa, anotação ou revisão.
+
+  var progressStatus = '';
+  var progressTimer = null;
+  var progressBusy = false;
+
+  function progressSnapshot() {
+    var reviews = {};
+    Object.keys(game.reviews).forEach(function (k) {
+      if (game.reviews[k] && game.reviews[k].seen) reviews[k] = { seen: true, at: game.reviews[k].at || k };
+    });
+    return { days: game.days, doneLists: game.doneLists, badges: game.badges, total: game.total, listsDone: game.listsDone, reviews: reviews };
+  }
+
+  // Mesma regra do servidor: maior contagem por dia, conquista mais antiga, maior total.
+  function mergeProgressLocal(r) {
+    if (!r || typeof r !== 'object') return false;
+    var before = JSON.stringify([game.days, game.doneLists, game.badges, game.total, game.listsDone, Object.keys(game.reviews)]);
+    ['days', 'doneLists'].forEach(function (f) {
+      var m = r[f] || {};
+      Object.keys(m).forEach(function (k) { if (m[k] > (game[f][k] || 0)) game[f][k] = m[k]; });
+    });
+    var b = r.badges || {};
+    Object.keys(b).forEach(function (id) { if (!game.badges[id] || b[id] < game.badges[id]) game.badges[id] = b[id]; });
+    game.total = Math.max(game.total, r.total || 0);
+    game.listsDone = Math.max(game.listsDone, r.listsDone || 0);
+    var rv = r.reviews || {};
+    Object.keys(rv).forEach(function (k) {
+      if (!game.reviews[k]) game.reviews[k] = { helped: '', next: '', at: (rv[k] && rv[k].at) || k, seen: true };
+    });
+    return before !== JSON.stringify([game.days, game.doneLists, game.badges, game.total, game.listsDone, Object.keys(game.reviews)]);
+  }
+
+  function setProgressStatus(text) {
+    progressStatus = text;
+    var el = document.getElementById('m-progress-status');
+    if (el) el.textContent = text;
+  }
+
+  function scheduleProgressSync() {
+    if (!game.syncProgress || !session) return;
+    clearTimeout(progressTimer);
+    progressTimer = setTimeout(syncProgress, 8000);
+  }
+
+  function syncProgress() {
+    if (!game.syncProgress || !session || progressBusy) return Promise.resolve();
+    progressBusy = true;
+    return apiFetch('GET', '/progress').then(function (res) {
+      if (res.status === 404 || res.status === 501) { setProgressStatus('O servidor ainda não tem essa função. Seu progresso segue só neste aparelho.'); return; }
+      if (!res.ok) { setProgressStatus('Não deu pra sincronizar agora. Tento de novo depois.'); return; }
+      var changed = mergeProgressLocal(res.data && res.data.data);
+      if (changed) { try { localStorage.setItem(GAME_KEY, JSON.stringify(game)); } catch (e) {} }
+      return apiFetch('PUT', '/progress', progressSnapshot()).then(function (put) {
+        if (!put.ok) { setProgressStatus('Não deu pra sincronizar agora. Tento de novo depois.'); return; }
+        setProgressStatus('Sincronizado.');
+        if (changed) { if (currentListId) renderDetail(); else renderHome(); }
+      });
+    }).catch(function () { setProgressStatus('Sem conexão. Tento de novo depois.'); })
+      .then(function () { progressBusy = false; });
   }
 
   // ---------- contas e sync por lista ----------
@@ -3768,6 +3878,8 @@
         '<div class="settings-row"><span>Conta: <strong id="m-account-username">' + escapeHtml(session.username) + '</strong></span>' +
           '<button id="m-logout" class="btn btn-secondary" style="flex:none;">Sair</button></div>' +
         '<p class="hint" style="margin:0;">Suas listas sincronizam sozinhas entre os aparelhos em que você entrou (a cada ~5s com o app aberto).</p>' +
+        '<div class="settings-row"><span>Guardar meu progresso na conta</span><button id="m-progress-toggle" class="switch" role="switch" aria-label="Guardar meu progresso na conta" aria-checked="' + (game.syncProgress ? 'true' : 'false') + '"><span></span></button></div>' +
+        '<p class="hint" style="margin:0;">Só números e conquistas (nunca o texto das suas tarefas) — assim o progresso é o mesmo em todos os aparelhos. <span id="m-progress-status">' + escapeHtml(game.syncProgress ? progressStatus : '') + '</span></p>' +
         (unsent ? '<button id="m-send-local" class="btn btn-secondary">Enviar as ' + unsent + ' lista(s) só deste aparelho pra conta</button>' : '') +
         '<button id="m-join" class="btn btn-secondary">Entrar numa lista com convite</button>' +
         '<button id="m-rename-user" class="btn btn-secondary">Trocar nome de usuário</button>' +
@@ -3784,6 +3896,12 @@
           closeModal();
           showHome();
         });
+      });
+      document.getElementById('m-progress-toggle').addEventListener('click', function () {
+        game.syncProgress = !game.syncProgress;
+        saveGame();
+        this.setAttribute('aria-checked', game.syncProgress ? 'true' : 'false');
+        if (game.syncProgress) { setProgressStatus('Sincronizando…'); syncProgress(); } else setProgressStatus('');
       });
       var sendBtn = document.getElementById('m-send-local');
       if (sendBtn) {
@@ -3973,6 +4091,51 @@
     return outputArray;
   }
 
+  // ---------- lembrete por tarefa ----------
+
+  function taskKey(list, item) { return list.id + ':' + item.id; }
+
+  function getTaskReminder(list, item) {
+    var r = game.taskReminders[taskKey(list, item)];
+    return r && r.date >= todayStr() ? r : null;
+  }
+
+  function remindWhen(r) {
+    return r.date === todayStr() ? 'hoje ' + r.time : r.date.slice(8) + '/' + r.date.slice(5, 7) + ' ' + r.time;
+  }
+
+  function setTaskReminder(list, item, date, time) {
+    game.taskReminders[taskKey(list, item)] = { date: date, time: time };
+    saveGame();
+    scheduleReminderSync();
+  }
+
+  function clearTaskReminder(list, item) {
+    delete game.taskReminders[taskKey(list, item)];
+    saveGame();
+    scheduleReminderSync();
+  }
+
+  // Só vai pro servidor o que ainda vale: tarefa existente, pendente e com data de hoje em diante.
+  function buildTaskReminders() {
+    var out = [], today = todayStr(), changed = false;
+    Object.keys(game.taskReminders).forEach(function (key) {
+      var r = game.taskReminders[key];
+      var i = key.indexOf(':');
+      var list = getList(key.slice(0, i));
+      var item = list && list.items.filter(function (x) { return x.id === key.slice(i + 1); })[0];
+      if (!r || r.date < today || (list && !item)) { delete game.taskReminders[key]; changed = true; return; }
+      if (!list || item.done) return;
+      out.push({ listId: list.id, itemId: item.id, listName: list.name, emoji: list.emoji, text: item.text, date: r.date, time: r.time });
+    });
+    if (changed) saveGame();
+    return out;
+  }
+
+  function isMutedToday() { return game.muteDate === todayStr(); }
+
+  var pushFeatures = null; // o que o servidor diz que sabe fazer (null = ainda não sei)
+
   function buildRemindersPayload() {
     var out = [];
     state.lists
@@ -3999,8 +4162,15 @@
         body: JSON.stringify({
           subscription: sub.toJSON(),
           timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-          reminders: buildRemindersPayload()
+          reminders: buildRemindersPayload(),
+          taskReminders: buildTaskReminders(),
+          muteDate: isMutedToday() ? todayStr() : null
         })
+      }).then(function (resp) {
+        // servidor novo responde JSON com "features"; o antigo responde só "ok"
+        return resp.json().catch(function () { return null; });
+      }).then(function (data) {
+        pushFeatures = (data && Array.isArray(data.features)) ? data.features : [];
       }).catch(function () {});
     }).catch(function () {});
   }
@@ -4221,6 +4391,7 @@
   maybeGreet();
   cloudTick();
   startCloudPolling();
+  if (session) syncProgress();
   (function () {
     var invite = false;
     try {

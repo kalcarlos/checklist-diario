@@ -55,3 +55,11 @@ CREATE TABLE IF NOT EXISTS oauth_identities (
   email       TEXT,
   PRIMARY KEY (provider, subject)
 );
+
+-- Progresso sincronizado (so contagens por dia, conquistas e marcas de revisao vista; nunca textos).
+-- Opcional: o app so usa quando a pessoa liga "Sincronizar progresso" em Ajustes.
+CREATE TABLE IF NOT EXISTS progress (
+  user_id     TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  data        TEXT NOT NULL,
+  updated_at  INTEGER NOT NULL
+);
