@@ -480,6 +480,16 @@
     'Lista completa! 🎉', 'Mandou bem! ✨', 'Tudo feito, parabéns! 🙌', 'Missão cumprida! 🚀',
     'Que capricho! 🌟', 'Uma a menos na cabeça! 😌', 'Arrasou! 💪', 'Feito é melhor que perfeito! 👏'
   ];
+  // Conquistas: permanentes (nunca se perdem) e só aparecem como celebração.
+  var BADGES = [
+    { id: 'first', icon: '🌱', name: 'Primeiro passo', hint: 'Marque um item', test: function (g) { return g.total >= 1; } },
+    { id: 'list1', icon: '🎯', name: 'Lista completa', hint: 'Termine uma lista inteira', test: function (g) { return g.listsDone >= 1; } },
+    { id: 'week3', icon: '📅', name: '3 dias na semana', hint: '3 dias ativos em 7 dias', test: function () { return activeDaysLast7() >= 3; } },
+    { id: 'week5', icon: '🔥', name: '5 dias na semana', hint: '5 dias ativos em 7 dias', test: function () { return activeDaysLast7() >= 5; } },
+    { id: 'streak7', icon: '🏆', name: 'Sequência de 7', hint: '7 dias seguidos (com perdão)', test: function () { return currentStreak() >= 7; } },
+    { id: 'total50', icon: '⭐', name: '50 itens feitos', hint: 'Faça 50 itens', test: function (g) { return g.total >= 50; } },
+    { id: 'total200', icon: '💎', name: '200 itens feitos', hint: 'Faça 200 itens', test: function (g) { return g.total >= 200; } }
+  ];
   var justCheckedItemId = null;
   var game = loadGame();
 
@@ -489,6 +499,9 @@
     if (!g || typeof g !== 'object') g = {};
     if (!g.days || typeof g.days !== 'object') g.days = {};
     if (g.enabled === undefined) g.enabled = true;
+    if (!g.badges || typeof g.badges !== 'object') g.badges = {};
+    g.total = g.total || 0;
+    g.listsDone = g.listsDone || 0;
     return g;
   }
 
@@ -559,18 +572,36 @@
   // Chamado depois que um item é marcado ou desmarcado numa lista.
   function onItemToggled(list, item) {
     if (!game.enabled) return;
-    if (!item.done) { recordCheck(-1); return; }
+    if (!item.done) { game.total = Math.max(0, game.total - 1); recordCheck(-1); return; }
     var firstOfDay = !game.days[todayStr()];
+    game.total++;
     recordCheck(1);
     justCheckedItemId = item.id;
     var complete = list.items.length > 0 && list.items.every(function (i) { return i.done; });
-    if (complete) {
+    if (complete) game.listsDone++;
+    var badge = unlockBadges();
+    if (badge) {
+      vibrate([20, 40, 20]);
+      showToast(badge.icon + ' Conquista: ' + badge.name);
+    } else if (complete) {
       vibrate([20, 40, 20]);
       showToast(CELEBRATIONS[Math.floor(Math.random() * CELEBRATIONS.length)]);
     } else {
       vibrate(12);
       if (firstOfDay) showToast('Primeiro do dia! 🌱');
     }
+  }
+
+  // Devolve a primeira conquista nova (ou null) e grava todas as desbloqueadas.
+  function unlockBadges() {
+    var first = null;
+    BADGES.forEach(function (b) {
+      if (game.badges[b.id] || !b.test(game)) return;
+      game.badges[b.id] = todayStr();
+      if (!first) first = b;
+    });
+    saveGame();
+    return first;
   }
 
   function renderDetailProgress(list) {
@@ -613,6 +644,11 @@
       cells += '<span class="heat-cell l' + lvl + '" title="' + dayKey(d) + ': ' + c + '"></span>';
     }
     var total = Object.keys(game.days).length;
+    var badgesHtml = BADGES.map(function (b) {
+      var got = !!game.badges[b.id];
+      return '<div class="badge' + (got ? '' : ' locked') + '"><span class="badge-icon">' + (got ? b.icon : '🔒') + '</span>' +
+        '<span><strong>' + b.name + '</strong><br><small>' + (got ? 'Conquistada!' : b.hint) + '</small></span></div>';
+    }).join('');
     openModal(
       '<h2>Seu histórico</h2>' +
       '<div class="heatmap" aria-label="Dias com atividade nas últimas 12 semanas">' + cells + '</div>' +
@@ -620,6 +656,8 @@
         ' · sequência atual: ' + currentStreak() + '</p>' +
       '<p class="hint" style="margin:0;">Um dia sem marcar nada não zera a sequência (você tem um perdão a cada 7 dias). ' +
         'Cada quadradinho é um dia; quanto mais escuro, mais itens feitos.</p>' +
+      '<h3 style="margin:4px 0 0;font-size:15px;">Conquistas</h3>' +
+      '<div class="badges">' + badgesHtml + '</div>' +
       '<button id="m-cancel" class="btn btn-secondary">Fechar</button>'
     );
     document.getElementById('m-cancel').addEventListener('click', closeModal);

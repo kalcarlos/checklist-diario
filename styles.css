@@ -598,3 +598,17 @@ body {
   .item-row.just-done .check { animation: none; }
   .game-toast, .progress-bar.big > div { transition: none; }
 }
+
+.badges { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-size: 13px;
+}
+.badge small { color: var(--text-dim); }
+.badge.locked { opacity: .55; }
+.badge-icon { font-size: 22px; }
