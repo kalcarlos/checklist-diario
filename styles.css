@@ -10,24 +10,25 @@
 :root {
   color-scheme: light dark;
 
-  /* cor — claro */
-  --bg: #f4f5f9;
-  --surface: #ffffff;
-  --surface-2: #edeff5;
-  --text: #0f1523;
-  --text-dim: #566074;
-  --text-faint: #8a93a6;
-  --accent: #0b6bf2;
+  /* cor — claro: "papel" quente em vez de branco puro (menos ofuscamento) */
+  --bg: #f6f5f1;
+  --surface: #fffefb;
+  --surface-2: #ecebe4;
+  --text: #1c2333;            /* ardósia escura, não preto puro */
+  --text-dim: #596273;
+  --text-faint: #8b92a1;      /* só decorativo (nunca texto essencial) */
+  --accent: #4155cc;          /* índigo calmo: ação e foco */
   --on-accent: #ffffff;
-  --done: #1fa855;
+  --done: #23895a;            /* verde-sálvia: "feito" (sempre com ícone ✓) */
   --on-done: #ffffff;
-  --danger: #e5352b;
-  --warm: #f59e0b;
-  --border: rgba(15, 21, 35, .09);
-  --scrim: rgba(10, 14, 25, .45);
-  --shadow-1: 0 1px 2px rgba(15, 21, 35, .06), 0 2px 8px rgba(15, 21, 35, .04);
-  --shadow-2: 0 10px 30px rgba(15, 21, 35, .16);
-  --shadow-fab: 0 8px 22px rgba(11, 107, 242, .38);
+  --danger: #c23f38;          /* coral fechado: só para ações destrutivas */
+  --warm: #d98b1f;            /* âmbar suave: conquistas e incentivo */
+  --border: rgba(28, 35, 51, .09);
+  --scrim: rgba(15, 20, 34, .45);
+  --shadow-1: 0 1px 2px rgba(28, 35, 51, .06), 0 2px 8px rgba(28, 35, 51, .04);
+  --shadow-2: 0 10px 30px rgba(28, 35, 51, .16);
+  --shadow-fab: 0 8px 22px rgba(65, 85, 204, .34);
+  --tile-s: 75%; --tile-l: 91%;  /* tom de cada lista (ícone) */
 
   /* aliases legados */
   --card: var(--surface);
@@ -60,23 +61,24 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #090e1b;
-    --surface: #131b2d;
-    --surface-2: #1b2540;
-    --text: #f1f4fa;
-    --text-dim: #9ba7be;
-    --text-faint: #6f7b94;
-    --accent: #3d9bff;
-    --on-accent: #04101f;
-    --done: #34d27b;
-    --on-done: #04210f;
-    --danger: #ff5f55;
-    --warm: #ffb340;
+    --bg: #0f1422;
+    --surface: #171d2e;
+    --surface-2: #212940;
+    --text: #eceff6;
+    --text-dim: #a3adc2;
+    --text-faint: #717d96;
+    --accent: #93a5ff;
+    --on-accent: #0d1330;
+    --done: #62d6a0;
+    --on-done: #06241a;
+    --danger: #ff8a80;
+    --warm: #ffcb7a;
     --border: rgba(255, 255, 255, .08);
-    --scrim: rgba(0, 0, 0, .6);
+    --scrim: rgba(5, 8, 16, .62);
     --shadow-1: 0 1px 2px rgba(0, 0, 0, .3), 0 2px 10px rgba(0, 0, 0, .18);
     --shadow-2: 0 14px 36px rgba(0, 0, 0, .55);
-    --shadow-fab: 0 8px 24px rgba(61, 155, 255, .35);
+    --shadow-fab: 0 8px 24px rgba(147, 165, 255, .28);
+    --tile-s: 34%; --tile-l: 26%;
   }
 }
 
@@ -264,7 +266,8 @@ svg.i.sm { width: 18px; height: 18px; }
   font-size: 24px;
   flex-shrink: 0;
 }
-.list-card.complete .emoji { background: var(--done-soft); }
+.list-card[style*="--hue"] .emoji { background: hsl(var(--hue) var(--tile-s) var(--tile-l)); }
+.list-card.complete .emoji, .list-card.complete[style*="--hue"] .emoji { background: var(--done-soft); }
 .list-card .info { flex: 1; min-width: 0; }
 
 .list-card .name {
@@ -297,11 +300,12 @@ svg.i.sm { width: 18px; height: 18px; }
 }
 .progress-bar > div {
   height: 100%;
-  background: var(--done);
+  background: var(--accent);
   border-radius: var(--r-pill);
   transition: width var(--dur-3) var(--ease);
 }
 .progress-bar.big { height: 10px; margin-top: var(--s-2); }
+.list-card.complete .progress-bar > div, .detail-progress.is-done .progress-bar > div { background: var(--done); }
 
 /* ações discretas (editar / arrastar / excluir) */
 .edit-btn, .drag-handle, .item-row .delete, .list-card .delete {

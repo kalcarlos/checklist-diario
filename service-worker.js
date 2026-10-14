@@ -1,4 +1,4 @@
-var CACHE_NAME = 'checklist-diario-v23';
+var CACHE_NAME = 'checklist-diario-v24';
 var ASSETS = [
   './',
   './index.html',
@@ -7,6 +7,7 @@ var ASSETS = [
   './manifest.json',
   './icons/icon-192.png',
   './icons/icon-512.png',
+  './icons/icon-maskable-512.png',
   './icons/apple-touch-icon.png',
   './icons/favicon-32.png'
 ];
