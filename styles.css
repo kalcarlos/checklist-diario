@@ -958,3 +958,4 @@ svg.i.sm { width: 18px; height: 18px; }
 .focus-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--s-2); }
 .focus-step { display: flex; align-items: center; gap: var(--s-3); min-height: 46px; padding: 0 var(--s-3); background: var(--surface-2); border-radius: var(--r-md); cursor: pointer; }
 .focus-actions #m-cancel { grid-column: 1 / -1; }
+.item-row, .list-card, .today-row { flex-shrink: 0; }

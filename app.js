@@ -1628,8 +1628,10 @@
           '<textarea class="name" rows="1" readonly></textarea>' +
           '<div class="meta">' + (list.items.length === 0 ? 'Sem itens' : (total === 0 ? 'Tudo adiado' : (done === total ? 'Tudo feito 🎉' : done + ' de ' + total + ' feitos'))) +
             (snoozedN ? ' · ' + snoozedN + (snoozedN > 1 ? ' adiados' : ' adiado') : '') +
-            (list.type === 'rotina' ? ' · ' + (list.days && list.days.length && list.days.length < 7 ? daysLabel(list).toLowerCase() : 'diária') : '') +
-            (offToday ? ' · hoje não (próxima: ' + nextScheduledLabel(list) + ')' : '') + roleMeta(list) + '</div>' +
+            (offToday
+              ? ' · hoje não · volta ' + nextScheduledLabel(list)
+              : (list.type === 'rotina' && !snoozedN ? ' · ' + (list.days && list.days.length && list.days.length < 7 ? daysLabel(list).toLowerCase() : 'diária') : '')) +
+            roleMeta(list) + '</div>' +
           '<div class="progress-bar"><div style="width:' + pct + '%"></div></div>' +
         '</div>' +
         (canEditMeta(list) ? '<button class="edit-btn" aria-label="Renomear">' + ICONS.edit + '</button>' : '') +

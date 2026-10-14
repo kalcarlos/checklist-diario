@@ -68,6 +68,10 @@ O lembrete diário de cada lista é por pessoa: numa lista compartilhada, cada u
 - **Primeira abertura guiada**: só em instalação nova (3 passos: boas-vindas, perfil de uso e modelos). Os perfis ("preciso de ajuda para focar", "ritmo mais tranquilo", "só o básico") apenas ligam ou desligam opções que já existem em Ajustes; dá pra trocar depois em Ajustes → Perfil de uso.
 - **Modelos de lista** (manhã, noite, casa em 15 minutos, mercado, mala de viagem, contas) na tela Nova lista, e **Duplicar lista** no menu da lista.
 - **Recompensa pessoal** (menu da lista → Recompensa ao concluir): ao terminar a lista aparece o combinado ("☕ Um café"), uma vez por dia por lista. Fica só neste aparelho.
+- **Passos dentro da tarefa**: toque no texto de um item para abrir o painel. Dá para adicionar passos (colar várias linhas cria vários), marcar cada um e ver o progresso "2/4". Fechar o último passo conclui a tarefa; reabrir um passo reabre. Os passos também aparecem no modo foco e "Dividir em passos" cria passos dentro da tarefa (ou tarefas separadas, se preferir). No reinício diário das rotinas os passos desmarcam junto.
+- **Adiar** (painel da tarefa ou modo foco): amanhã, em 3 dias ou semana que vem. A tarefa sai das contagens, do "Para agora" e do foco e volta sozinha na data; dá para trazer de volta antes. Tem "Desfazer".
+- **Rotina por dias da semana** (menu da rotina → Dias da semana): fora desses dias o cartão fica tracejado ("hoje não · volta qua"), a rotina não entra em "Para agora" nem na saudação. O lembrete push só respeita os dias depois de publicar o Worker atualizado (`push-server/`); sem isso ele continua avisando todo dia, como antes.
+- **Prioridades do dia** (⭐ no painel da tarefa): escolha até 3; "Para agora" passa a mostrar só as escolhidas até o fim do dia ("Limpar escolhas" volta ao automático). Ficam só neste aparelho.
 
 - **Busca** (🔍 na home): procura um texto em todos os itens de todas as listas.
 - **Ordenar por** (menu ⋯ da lista): manual (arrastar), alfabética, ou pendentes primeiro. Arrastar só funciona no modo manual.
