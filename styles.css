@@ -21,7 +21,7 @@
   --on-accent: #ffffff;
   --done: #23895a;            /* verde-sálvia: "feito" (sempre com ícone ✓) */
   --on-done: #ffffff;
-  --danger: #c23f38;          /* coral fechado: só para ações destrutivas */
+  --danger: #b0332c;          /* coral fechado: só para ações destrutivas */
   --warm: #d98b1f;            /* âmbar suave: conquistas e incentivo */
   --border: rgba(28, 35, 51, .09);
   --scrim: rgba(15, 20, 34, .45);
@@ -213,7 +213,7 @@ svg.i.sm { width: 18px; height: 18px; }
 }
 
 .hint { color: var(--text-dim); font-size: var(--fs-sm); margin: var(--s-3) var(--s-4) 0; line-height: 1.45; }
-#detail-hint { font-size: var(--fs-xs); margin: 0 var(--s-5) var(--s-2); text-align: center; color: var(--text-faint); }
+#detail-hint { font-size: var(--fs-xs); margin: 0 var(--s-5) var(--s-2); text-align: center; color: var(--text-dim); }
 
 /* 4. Componentes ----------------------------------------------------------- */
 
@@ -409,7 +409,7 @@ svg.i.sm { width: 18px; height: 18px; }
 
 .item-row {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: var(--s-2);
   background: var(--surface);
   border: 1px solid var(--border);
@@ -453,13 +453,13 @@ svg.i.sm { width: 18px; height: 18px; }
   border: none;
   resize: none;
   overflow: hidden;
-  padding: 3px 0 0;
+  padding: 2px 0;
   margin: 0;
   line-height: 1.4;
   transition: color var(--dur-2) var(--ease);
 }
 .item-row .text:focus { outline: none; }
-.item-row .text:not([readonly]) { background: var(--surface-2); border-radius: var(--r-sm); padding: 3px var(--s-2); }
+.item-row .text:not([readonly]) { background: var(--surface-2); border-radius: var(--r-sm); padding: 2px var(--s-2); }
 .item-row.done .text { text-decoration: line-through; text-decoration-color: var(--text-faint); color: var(--text-dim); }
 .item-row .text[readonly], .list-card .name[readonly] { cursor: default; }
 
