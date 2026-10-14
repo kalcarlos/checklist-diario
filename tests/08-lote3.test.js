@@ -98,7 +98,7 @@ const WEEK = '2026-10-12';
   await p.evaluate(() => { window.__clip = null; navigator.share = undefined; navigator.clipboard.writeText = (t) => { window.__clip = t; return Promise.resolve(); }; });
   await openList(p); await p.click('#btn-list-menu'); await p.click('#m-share'); await p.waitForTimeout(200);
   ok('"Copiar como texto" inclui a nota numa linha', /📝 Dra\. Ana 3456-7890/.test(await p.evaluate(() => window.__clip) || ''));
-  await p.click('#btn-list-menu'); await p.click('#m-duplicate'); await p.waitForTimeout(250);
+  await p.click('#m-duplicate'); await p.waitForTimeout(250); // o menu continua aberto depois de copiar
   ok('duplicar lista copia a nota', (await stored(p, 'checklist-diario:v1')).lists[1].items[0].note === 'Dra. Ana\n3456-7890');
   ok('sem erros de JS', p.errs.length === 0, p.errs);
 
