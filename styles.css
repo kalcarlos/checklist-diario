@@ -612,3 +612,12 @@ body {
 .badge small { color: var(--text-dim); }
 .badge.locked { opacity: .55; }
 .badge-icon { font-size: 22px; }
+
+.focus-btn { width: 100%; margin-top: 8px; flex: none; }
+.focus-text {
+  font-size: 22px;
+  font-weight: 700;
+  text-align: center;
+  padding: 24px 8px;
+  overflow-wrap: anywhere;
+}

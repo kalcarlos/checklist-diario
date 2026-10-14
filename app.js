@@ -607,14 +607,54 @@
   function renderDetailProgress(list) {
     var box = document.getElementById('detail-progress');
     var total = list.items.length;
-    if (!game.enabled || total === 0) { box.classList.add('hidden'); box.innerHTML = ''; return; }
     var done = list.items.filter(function (i) { return i.done; }).length;
     var left = total - done;
-    var label = left === 0 ? 'Tudo feito! 🎉' : (left === 1 ? 'Falta só 1' : 'Faltam ' + left);
+    var html = '';
+    if (game.enabled && total > 0) {
+      var label = left === 0 ? 'Tudo feito! 🎉' : (left === 1 ? 'Falta só 1' : 'Faltam ' + left);
+      html +=
+        '<div class="detail-progress-label"><span>' + label + '</span><span>' + done + '/' + total + '</span></div>' +
+        '<div class="progress-bar big"><div style="width:' + Math.round((done / total) * 100) + '%"></div></div>';
+    }
+    var canFocus = canEditItems(list) && left > 0;
+    if (canFocus) html += '<button id="btn-focus" class="btn btn-secondary focus-btn">🎯 Modo foco: uma tarefa por vez</button>';
+    if (!html) { box.classList.add('hidden'); box.innerHTML = ''; return; }
     box.classList.remove('hidden');
-    box.innerHTML =
-      '<div class="detail-progress-label"><span>' + label + '</span><span>' + done + '/' + total + '</span></div>' +
-      '<div class="progress-bar big"><div style="width:' + Math.round((done / total) * 100) + '%"></div></div>';
+    box.innerHTML = html;
+    if (canFocus) document.getElementById('btn-focus').addEventListener('click', function () { openFocusMode(list); });
+  }
+
+  // Modo foco: mostra só a próxima tarefa pendente, grande, com "Feito" e
+  // "Pular" (pular só muda a ordem de hoje, não mexe na lista).
+  function openFocusMode(list) {
+    var skipped = [];
+    function render() {
+      var pending = list.items.filter(function (i) { return !i.done; });
+      if (pending.length === 0) { closeModal(); renderDetail(); return; }
+      var candidates = pending.filter(function (i) { return skipped.indexOf(i.id) === -1; });
+      if (candidates.length === 0) { skipped = []; candidates = pending; }
+      var item = candidates[0];
+      openModal(
+        '<p class="hint" style="margin:0;">' + (pending.length === 1 ? 'Falta só 1' : 'Faltam ' + pending.length) + '</p>' +
+        '<div id="focus-text" class="focus-text"></div>' +
+        '<button id="m-focus-done" class="btn btn-primary">Feito ✓</button>' +
+        (pending.length > 1 ? '<button id="m-focus-skip" class="btn btn-secondary">Pular por agora</button>' : '') +
+        '<button id="m-cancel" class="btn btn-secondary">Sair do foco</button>'
+      );
+      document.getElementById('focus-text').textContent = item.text;
+      document.getElementById('m-focus-done').addEventListener('click', function () {
+        item.done = true;
+        save();
+        onItemToggled(list, item);
+        renderDetail();
+        justCheckedItemId = null;
+        render();
+      });
+      var skipBtn = document.getElementById('m-focus-skip');
+      if (skipBtn) skipBtn.addEventListener('click', function () { skipped.push(item.id); render(); });
+      document.getElementById('m-cancel').addEventListener('click', closeModal);
+    }
+    render();
   }
 
   function renderGameSummary() {
