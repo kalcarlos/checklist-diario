@@ -179,6 +179,20 @@ async function main() {
   await trigger(); await sleep(500);
   ok('e não é tentada de novo no cron seguinte', (hits.get(s.endpoint.split('/').pop()) || 0) === 1);
 
+  console.log('3b. Backup por código (/data/save e /data/load)');
+  const code = 'AbCdEfGhIjKlMnOpQrStUvWx'; // 24 caracteres, como o app gera
+  const sv = await api('POST', '/data/save', null, { code, data: { lists: [{ id: 'a', name: 'Casa', items: [{ id: 'i', text: 'regar', done: false }] }], lastResetDate: '2026-10-14' } });
+  ok('salva com código de 24 caracteres', sv.status === 200 && sv.data && sv.data.ok && sv.data.updatedAt > 0, sv);
+  const ld = await api('POST', '/data/load', null, { code });
+  ok('carrega a mesma cópia', ld.status === 200 && ld.data.data.lists[0].name === 'Casa' && ld.data.data.lists[0].items[0].text === 'regar', ld);
+  const sv2 = await api('POST', '/data/save', null, { code, data: { lists: [], lastResetDate: '2026-10-14' } });
+  const ld2 = await api('POST', '/data/load', null, { code });
+  ok('novo envio substitui a cópia (e atualiza o horário)', ld2.data.data.lists.length === 0 && ld2.data.updatedAt >= ld.data.updatedAt && sv2.status === 200, ld2);
+  const nf = await api('POST', '/data/load', null, { code: 'ZzZzZzZzZzZzZzZzZzZzZzZz' });
+  ok('código desconhecido: 404', nf.status === 404, nf);
+  const bad = await api('POST', '/data/save', null, { code: 'curto', data: {} });
+  ok('código inválido: 400', bad.status === 400, bad);
+
   console.log('4. Exclusão de conta limpa o progresso');
   const C = await register('caio_e2e');
   await api('PUT', '/progress', C.token, { data: { total: 9, days: { '2026-10-12': 1 } } });

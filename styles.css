@@ -1059,3 +1059,17 @@ svg.i.sm { width: 18px; height: 18px; }
 .rt-bar { width: 100%; max-width: 28px; min-height: 3px; border-radius: 6px; background: color-mix(in srgb, var(--accent) 35%, var(--surface)); }
 .rt-col.best .rt-bar { background: var(--accent); }
 .rt-lbl { font-size: 0.75rem; color: var(--text-dim); }
+
+/* backup automático */
+.backup-nudge.hidden { display: none; }
+.backup-nudge {
+  display: flex; flex-direction: column; gap: var(--s-3);
+  margin: 0 var(--s-4) var(--s-3); padding: var(--s-4);
+  background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent); border-radius: var(--r-lg);
+}
+.nudge-btns { display: flex; flex-wrap: wrap; gap: var(--s-2); }
+.backup-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 1.05rem; font-weight: 700; letter-spacing: .04em;
+  text-align: center; word-break: break-all; user-select: all; -webkit-user-select: all;
+  padding: var(--s-4); border-radius: var(--r-md); background: var(--surface-2); color: var(--text); border: 1px dashed var(--border);
+}

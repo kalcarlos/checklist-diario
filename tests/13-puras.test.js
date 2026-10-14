@@ -117,5 +117,19 @@ ok('contribuições: mais itens primeiro; só concluídos com autor', P.contribu
 ok('empate: "eu" vem primeiro, mesmo depois no alfabeto', P.contributionsOf(items, 'zeca').map((c) => c.name).join() === 'bruno,zeca,carla');
 ok('sem itens: lista vazia', P.contributionsOf([], 'zeca').length === 0);
 
+console.log('9. backup automático');
+const n0 = new Date(2026, 9, 14, 10, 0);
+ok('backup vencido: nunca enviado', P.backupDue(0, n0) === true);
+ok('backup vencido: enviado ontem', P.backupDue(new Date(2026, 9, 13, 23, 59).getTime(), n0) === true);
+ok('backup em dia: enviado hoje cedo', P.backupDue(new Date(2026, 9, 14, 0, 1).getTime(), n0) === false);
+ok('idade: hoje/ontem/data/nunca', P.backupAge(new Date(2026, 9, 14, 9, 5).getTime(), n0) === 'hoje às 09:05' && P.backupAge(new Date(2026, 9, 13, 21, 30).getTime(), n0) === 'ontem às 21:30' && P.backupAge(new Date(2026, 9, 2, 8, 0).getTime(), n0) === '02/10 às 08:00' && P.backupAge(0, n0) === 'ainda não enviado');
+const rnd = Array.from({ length: 64 }, (_, i) => (i * 37 + 11) % 256);
+const code = P.makeBackupCode(rnd);
+ok('código: 24 caracteres alfanuméricos (aceito pelo servidor)', /^[A-Za-z0-9]{24}$/.test(code), code);
+ok('código: bytes insuficientes ou todos rejeitados -> null', P.makeBackupCode([1, 2, 3]) === null && P.makeBackupCode(new Array(64).fill(255)) === null);
+ok('código: aleatório de verdade difere', P.makeBackupCode(Array.from({ length: 64 }, (_, i) => (i * 91 + 5) % 256)) !== code);
+ok('agrupado de 4 em 4 e volta ao normal', P.groupBackupCode(code) === code.match(/.{4}/g).join('-') && P.normalizeBackupCode(P.groupBackupCode(code)) === code);
+ok('normaliza espaços e hífens; recusa curto/longo/vazio', P.normalizeBackupCode(' ab12 cd34-EF56 ') === 'ab12cd34EF56' && P.normalizeBackupCode('abc') === null && P.normalizeBackupCode('a'.repeat(33)) === null && P.normalizeBackupCode('') === null && P.normalizeBackupCode(null) === null);
+
 console.log(`\n${pass} ok, ${fail} falhas`);
 process.exit(fail ? 1 : 0);
