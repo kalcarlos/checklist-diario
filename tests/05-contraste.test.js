@@ -72,7 +72,9 @@ async function measureAll(p, scheme, label, bad, counter, includeControl) {
           { id: 'b', text: 'Pagar a conta de luz', done: false, snoozeUntil: d(-1) },
           { id: 'c', text: 'Regar as plantas', done: false }, { id: 'd', text: 'Passear', done: true }], 0),
         mk('m', 'Mercado', '🛒', 'lista', ['Leite'], 1),
-        mk('g', 'Academia', '🏋️', 'rotina', ['Treino'], 0, { days: other })] }));
+        mk('g', 'Academia', '🏋️', 'rotina', ['Treino'], 0, { days: other }),
+        mk('k', 'Casa da família', '🏡', 'lista', [{ id: 'k1', text: 'Lavar a louça', done: true, doneBy: 'bruno' }, { id: 'k2', text: 'Tirar o lixo', done: true, doneBy: 'zeca' }, { id: 'k3', text: 'Regar as plantas', done: false }], 0, { role: 'editor', rev: 1, members: [{ userId: 'u2', username: 'bruno', role: 'owner' }] })] }));
+      localStorage.setItem('checklist-diario:session', JSON.stringify({ token: 't', username: 'zeca', userId: 'u1' }));
       localStorage.setItem('checklist-diario:game', JSON.stringify({ enabled: true, onboarded: true, badges: { first: 'x' }, total: 3, listsDone: 1, greetedOn: d(0), days: { [d(0)]: 1 }, picks: { date: d(0), ids: [{ l: 'c', i: 'c' }] } }));
     });
     await p.reload(); await p.waitForTimeout(500);
@@ -86,6 +88,8 @@ async function measureAll(p, scheme, label, bad, counter, includeControl) {
     await p.click('.item-row:nth-child(3) .item-body'); await p.waitForTimeout(100);
     await p.click('#btn-focus'); await p.waitForTimeout(450); await measureAll(p, scheme, 'foco com passos', bad, counter); await hideModal();
     await p.click('#btn-list-menu'); await p.waitForTimeout(500); await measureAll(p, scheme, 'menu da lista', bad, counter); await hideModal();
+    await p.click('#btn-back'); await p.waitForTimeout(450);
+    await p.click('.list-card:nth-child(4)'); await p.waitForTimeout(500); await measureAll(p, scheme, 'lista compartilhada (quem fez)', bad, counter);
     await p.click('#btn-back'); await p.waitForTimeout(450);
     await p.click('#btn-settings'); await p.waitForTimeout(500); await measureAll(p, scheme, 'ajustes', bad, counter); await hideModal();
     await p.click('#btn-game-history'); await p.waitForTimeout(500); await measureAll(p, scheme, 'histórico', bad, counter);
