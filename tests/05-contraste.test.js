@@ -38,6 +38,8 @@ async function measureAll(p, scheme, label, bad, counter, includeControl) {
     });
     return out;
   }, includeControl);
+  // o controle só serve para a 1ª medição; depois sai da frente (senão intercepta cliques conforme o layout)
+  if (includeControl) await p.evaluate(() => { const e = document.getElementById('controle-contraste'); if (e) e.remove(); });
   let controlCaught = false;
   res.forEach((r) => {
     counter.n++;
