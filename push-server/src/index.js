@@ -282,12 +282,18 @@ async function runScheduledCheck(env) {
     if (!record) continue;
 
     const { date, hm } = nowPartsInTz(record.timezone);
+    // dia da semana (0 = domingo) na data local da pessoa
+    const weekday = new Date(date + 'T00:00:00Z').getUTCDay();
     let changed = false;
 
     for (const reminder of record.reminders) {
       if (!reminder.enabled) continue;
       if (reminder.time !== hm) continue;
       if (reminder.lastSentDate === date) continue;
+      // rotina só em certos dias da semana (lista vazia ou ausente = todo dia)
+      if (Array.isArray(reminder.days) && reminder.days.length && !reminder.days.includes(weekday)) {
+        reminder.lastSentDate = date; changed = true; continue;
+      }
       if (reminder.hasPending === false) { reminder.lastSentDate = date; changed = true; continue; }
 
       try {

@@ -29,6 +29,8 @@
     trash: icon('<path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/>', 'sm'),
     exit: icon('<path d="M14 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4M10 8l-4 4 4 4M6 12h10"/>', 'sm'),
     check: icon('<path d="m5 12.5 4.5 4.5L19 7.5"/>'),
+    x: icon('<path d="M6 6l12 12M18 6 6 18"/>', 'sm'),
+    plus: icon('<path d="M12 5v14M5 12h14"/>', 'sm'),
     wind: icon('<path d="M3 8h10a2.5 2.5 0 1 0-2.5-2.5M3 12h15a3 3 0 1 1-3 3M3 16h7"/>', 'sm')
   };
 
@@ -555,7 +557,10 @@
     state.lists.forEach(function (list) {
       if (list.type !== 'rotina' || list.role === 'viewer') return;
       if ((list.lastResetDate || state.lastResetDate) === today) return;
-      list.items.forEach(function (item) { item.done = false; });
+      list.items.forEach(function (item) {
+        item.done = false;
+        if (item.steps) item.steps.forEach(function (st) { st.done = false; });
+      });
       list.lastResetDate = today;
       changed = true;
     });
@@ -683,7 +688,8 @@
     game.total++;
     recordCheck(1);
     justCheckedItemId = item.id;
-    var complete = list.items.length > 0 && list.items.every(function (i) { return i.done; });
+    var actv = activeItems(list);
+    var complete = actv.length > 0 && actv.every(function (i) { return i.done; });
     if (complete) game.listsDone++;
     if (complete && game.rewards[list.id] && game.rewardShown[list.id] !== todayStr()) {
       setTimeout(function () { showReward(list, 0); }, 700);
@@ -728,8 +734,9 @@
 
   function renderDetailProgress(list) {
     var box = ensureBox('detail-progress', 'detail-progress', 'item-filter');
-    var total = list.items.length;
-    var done = list.items.filter(function (i) { return i.done; }).length;
+    var act = activeItems(list);
+    var total = act.length;
+    var done = act.filter(function (i) { return i.done; }).length;
     var left = total - done;
     var html = '';
     if (game.enabled && total > 0) {
@@ -753,7 +760,7 @@
   function openFocusMode(list) {
     var skipped = [];
     function render() {
-      var pending = list.items.filter(function (i) { return !i.done; });
+      var pending = list.items.filter(function (i) { return !i.done && !isSnoozed(i); });
       if (pending.length === 0) { closeModal(); renderDetail(); return; }
       var candidates = pending.filter(function (i) { return skipped.indexOf(i.id) === -1; });
       if (candidates.length === 0) { skipped = []; candidates = pending; }
@@ -762,16 +769,34 @@
         '<p class="hint" style="margin:0;">' + (game.calm ? 'Só esta, por agora' : (pending.length === 1 ? 'Falta só 1' : 'Faltam ' + pending.length)) +
           ' · toque no texto para aumentar/diminuir a letra</p>' +
         '<div id="focus-text" class="focus-text' + (game.focusLarge ? ' large' : '') + '"></div>' +
+        ((item.steps && item.steps.length)
+          ? '<ul class="focus-steps">' + item.steps.map(function (st, k) {
+              return '<li class="focus-step' + (st.done ? ' done' : '') + '" data-idx="' + k + '"><span class="step-check">' + (st.done ? ICONS.check : '') + '</span><span class="step-text"></span></li>';
+            }).join('') + '</ul>'
+          : '') +
         '<div id="focus-timer" class="focus-timer"></div>' +
         '<button id="m-focus-done" class="btn btn-primary">Feito ✓</button>' +
         '<div class="focus-actions">' +
           '<button id="m-focus-split" class="btn btn-secondary">Dividir em passos</button>' +
           '<button id="m-focus-breathe" class="btn btn-secondary">🌬️ Respirar</button>' +
           (pending.length > 1 ? '<button id="m-focus-skip" class="btn btn-secondary">Pular por agora</button>' : '') +
+          '<button id="m-focus-snooze" class="btn btn-secondary">⏰ Adiar</button>' +
           '<button id="m-cancel" class="btn btn-secondary">Sair do foco</button>' +
         '</div>'
       );
       document.getElementById('focus-text').textContent = item.text;
+      modal.querySelectorAll('.focus-step').forEach(function (li) {
+        var st = item.steps[parseInt(li.getAttribute('data-idx'), 10)];
+        li.querySelector('.step-text').textContent = st.text;
+        li.addEventListener('click', function () {
+          toggleStep(list, item, st);
+          renderDetail();
+          render();
+        });
+      });
+      document.getElementById('m-focus-snooze').addEventListener('click', function () {
+        openSnoozeSheet(list, item, function () { renderDetail(); render(); });
+      });
       document.getElementById('m-focus-done').addEventListener('click', function () {
         item.done = true;
         save();
@@ -885,26 +910,31 @@
     setTimeout(function () { step(0); }, 1200);
   }
 
-  // Próximas tarefas na home: só 3 por vez, para não sobrecarregar.
+  // Próximas tarefas na home: só 3 por vez, para não sobrecarregar. Se a pessoa
+  // escolheu prioridades para hoje (⭐), mostra só elas.
   function nextTasks() {
+    var picks = pickedTasks();
+    if (picks.length) return { tasks: picks, picked: true };
     var all = [];
     state.lists.forEach(function (l) {
-      if (!canEditItems(l)) return;
-      l.items.forEach(function (i) { if (!i.done) all.push({ list: l, item: i }); });
+      if (!canEditItems(l) || !scheduledToday(l)) return;
+      l.items.forEach(function (i) { if (!i.done && !isSnoozed(i)) all.push({ list: l, item: i }); });
     });
     // rotinas primeiro (são o "hoje" de verdade); a ordem original se mantém dentro de cada grupo
     var rotinas = all.filter(function (t) { return t.list.type === 'rotina'; });
     var outras = all.filter(function (t) { return t.list.type !== 'rotina'; });
-    return rotinas.concat(outras).slice(0, 3);
+    return { tasks: rotinas.concat(outras).slice(0, 3), picked: false };
   }
 
   function renderTodayBox() {
     var box = ensureBox('today-box', 'today-box', 'lists-container');
     box.innerHTML = '';
-    var tasks = game.today === false ? [] : nextTasks();
+    var nt = game.today === false ? { tasks: [], picked: false } : nextTasks();
+    var tasks = nt.tasks;
     var html = '';
     if (tasks.length) {
-      html += '<div class="today-title">Para agora</div>';
+      html += '<div class="today-title">' + (nt.picked ? '⭐ Suas prioridades de hoje' : 'Para agora') +
+        (nt.picked ? '<button id="btn-clear-picks" class="link-btn" type="button">Limpar escolhas</button>' : '') + '</div>';
       tasks.forEach(function (t, idx) {
         html += '<div class="today-row" data-idx="' + idx + '"><div class="check"></div>' +
           '<span class="today-text"></span><span class="today-emoji">' + t.list.emoji + '</span></div>';
@@ -925,6 +955,193 @@
       });
     });
     document.getElementById('btn-breathe').addEventListener('click', function () { openBreathing(closeModal); });
+    var clr = document.getElementById('btn-clear-picks');
+    if (clr) clr.addEventListener('click', function () { game.picks = null; saveGame(); renderHome(); });
+  }
+
+  // ---------- itens: passos, adiar, dias da semana e prioridades ----------
+
+  var WEEKDAYS = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'];
+  var expandedItemId = null;      // item com o painel (passos/adiar) aberto
+  var focusStepInputFor = null;   // depois de adicionar um passo, devolve o foco ao campo
+
+  function addDaysStr(n) { return dayKey(daysAgo(-n)); }
+
+  // Adiado = some das contagens, do "Para agora" e do foco até a data chegar.
+  function isSnoozed(item) { return !!item.snoozeUntil && item.snoozeUntil > todayStr(); }
+  function activeItems(list) { return list.items.filter(function (i) { return !isSnoozed(i); }); }
+
+  function snoozeWhen(dateStr) {
+    if (dateStr === addDaysStr(1)) return 'amanhã';
+    var p = dateStr.split('-');
+    return 'em ' + p[2] + '/' + p[1];
+  }
+
+  // Rotina só nos dias escolhidos (sem escolha = todo dia).
+  function scheduledToday(list) {
+    return list.type !== 'rotina' || !list.days || !list.days.length || list.days.indexOf(new Date().getDay()) !== -1;
+  }
+
+  function daysLabel(list) {
+    var d = (list.days || []).slice().sort();
+    if (!d.length || d.length === 7) return 'Todos os dias';
+    if (d.join() === '1,2,3,4,5') return 'Dias úteis';
+    if (d.join() === '0,6') return 'Fim de semana';
+    return d.map(function (n) { return WEEKDAYS[n]; }).join(', ');
+  }
+
+  function nextScheduledLabel(list) {
+    for (var i = 1; i <= 7; i++) {
+      var n = (new Date().getDay() + i) % 7;
+      if (list.days.indexOf(n) !== -1) return WEEKDAYS[n];
+    }
+    return '';
+  }
+
+  // passos (subtarefas) do item
+  function stepsDoneCount(item) {
+    return (item.steps || []).filter(function (st) { return st.done; }).length;
+  }
+
+  // Marca/desmarca um passo. Fechar o último passo conclui a tarefa; reabrir um
+  // passo de uma tarefa concluída a reabre. Cada passo conta como atividade do dia.
+  function toggleStep(list, item, step) {
+    step.done = !step.done;
+    if (game.enabled) recordCheck(step.done ? 1 : -1);
+    var all = item.steps.length > 0 && item.steps.every(function (st) { return st.done; });
+    if (all && !item.done) {
+      item.done = true;
+      save();
+      onItemToggled(list, item);
+    } else if (!step.done && item.done) {
+      item.done = false;
+      save();
+      onItemToggled(list, item);
+    } else {
+      save();
+    }
+  }
+
+  function addSteps(item, text) {
+    var lines = String(text).split(/\r?\n/).map(function (t) { return t.trim(); }).filter(Boolean);
+    if (!item.steps) item.steps = [];
+    lines.forEach(function (t) {
+      if (item.steps.length < 20) item.steps.push({ id: uid(), text: t.slice(0, 100), done: false });
+    });
+    return lines.length;
+  }
+
+  function snoozeItem(list, item, days, after) {
+    var prev = item.snoozeUntil;
+    item.snoozeUntil = addDaysStr(days);
+    expandedItemId = null;
+    save();
+    if (after) after();
+    showUndo('Adiado: volta ' + snoozeWhen(item.snoozeUntil), function () {
+      if (prev) item.snoozeUntil = prev; else delete item.snoozeUntil;
+      save();
+      rerender();
+    });
+  }
+
+  function openSnoozeSheet(list, item, back) {
+    openModal(
+      '<h2>Adiar para quando?</h2>' +
+      '<p class="hint">A tarefa some do "Para agora" e das contagens e volta sozinha na data. Sem culpa.</p>' +
+      '<div class="choice-list">' +
+        '<button type="button" class="choice-card" data-days="1"><span class="choice-emoji">🌅</span><span><strong>Amanhã</strong></span></button>' +
+        '<button type="button" class="choice-card" data-days="3"><span class="choice-emoji">📅</span><span><strong>Em 3 dias</strong></span></button>' +
+        '<button type="button" class="choice-card" data-days="7"><span class="choice-emoji">🗓️</span><span><strong>Semana que vem</strong></span></button>' +
+      '</div>' +
+      '<button id="m-cancel" class="btn btn-secondary">Voltar</button>'
+    );
+    modal.querySelectorAll('[data-days]').forEach(function (el) {
+      el.addEventListener('click', function () {
+        snoozeItem(list, item, parseInt(el.getAttribute('data-days'), 10), back);
+      });
+    });
+    document.getElementById('m-cancel').addEventListener('click', back);
+  }
+
+  // prioridades do dia (até 3, só neste aparelho)
+  function pickedTasks() {
+    if (!game.picks || game.picks.date !== todayStr()) return [];
+    var out = [];
+    game.picks.ids.forEach(function (p) {
+      var l = getList(p.l);
+      if (!l || !canEditItems(l)) return;
+      var it = l.items.filter(function (i) { return i.id === p.i; })[0];
+      if (it && !it.done && !isSnoozed(it)) out.push({ list: l, item: it });
+    });
+    return out.slice(0, 3);
+  }
+
+  function isPicked(list, item) {
+    return !!(game.picks && game.picks.date === todayStr() &&
+      game.picks.ids.some(function (p) { return p.l === list.id && p.i === item.id; }));
+  }
+
+  function togglePick(list, item) {
+    if (!game.picks || game.picks.date !== todayStr()) game.picks = { date: todayStr(), ids: [] };
+    var at = -1;
+    game.picks.ids.forEach(function (p, k) { if (p.l === list.id && p.i === item.id) at = k; });
+    if (at > -1) {
+      game.picks.ids.splice(at, 1);
+    } else {
+      if (pickedTasks().length >= 3) { showToast('Até 3 prioridades por dia. Tire uma para escolher outra.'); return false; }
+      game.picks.ids.push({ l: list.id, i: item.id });
+    }
+    saveGame();
+    return true;
+  }
+
+  function openDaysPicker(list) {
+    var chosen = (list.days || []).slice();
+    function paint() {
+      modal.querySelectorAll('[data-day]').forEach(function (el) {
+        el.classList.toggle('selected', chosen.indexOf(parseInt(el.getAttribute('data-day'), 10)) !== -1);
+      });
+    }
+    openModal(
+      '<h2>Dias da semana</h2>' +
+      '<p class="hint">Fora desses dias a rotina não aparece em "Para agora" e não manda lembrete. Sem nenhum dia marcado, vale todo dia.</p>' +
+      '<div class="chip-row">' + [1, 2, 3, 4, 5, 6, 0].map(function (n) {
+        return '<button type="button" class="chip" data-day="' + n + '">' + WEEKDAYS[n] + '</button>';
+      }).join('') + '</div>' +
+      '<div class="chip-row">' +
+        '<button type="button" class="chip" data-preset="all">Todos os dias</button>' +
+        '<button type="button" class="chip" data-preset="weekdays">Dias úteis</button>' +
+        '<button type="button" class="chip" data-preset="weekend">Fim de semana</button>' +
+      '</div>' +
+      '<div class="modal-actions">' +
+        '<button id="m-days-back" class="btn btn-secondary">Voltar</button>' +
+        '<button id="m-days-save" class="btn btn-primary">Salvar</button>' +
+      '</div>'
+    );
+    paint();
+    modal.querySelectorAll('[data-day]').forEach(function (el) {
+      el.addEventListener('click', function () {
+        var n = parseInt(el.getAttribute('data-day'), 10);
+        var i = chosen.indexOf(n);
+        if (i > -1) chosen.splice(i, 1); else chosen.push(n);
+        paint();
+      });
+    });
+    modal.querySelectorAll('[data-preset]').forEach(function (el) {
+      el.addEventListener('click', function () {
+        var k = el.getAttribute('data-preset');
+        chosen = k === 'all' ? [] : (k === 'weekdays' ? [1, 2, 3, 4, 5] : [0, 6]);
+        paint();
+      });
+    });
+    document.getElementById('m-days-back').addEventListener('click', function () { openListMenu(list); });
+    document.getElementById('m-days-save').addEventListener('click', function () {
+      chosen.sort();
+      if (!chosen.length || chosen.length === 7) delete list.days; else list.days = chosen;
+      save();
+      openListMenu(list);
+      if (currentListId) renderDetail(); else renderHome();
+    });
   }
 
   // ---------- modelos de lista, perfis de uso e recompensa ----------
@@ -958,7 +1175,12 @@
   function duplicateList(list) {
     var copy = createList(list.name + ' (cópia)', list.emoji, list.type);
     copy.sortOrder = list.sortOrder || 'manual';
-    copy.items = list.items.map(function (i) { return { id: uid(), text: i.text, done: false }; });
+    if (list.days && list.days.length) copy.days = list.days.slice();
+    copy.items = list.items.map(function (i) {
+      var c = { id: uid(), text: i.text, done: false };
+      if (i.steps && i.steps.length) c.steps = i.steps.map(function (st) { return { id: uid(), text: st.text, done: false }; });
+      return c;
+    });
     state.lists.push(copy);
     save();
     return copy;
@@ -1179,7 +1401,7 @@
     if (isNewInstall || !game.enabled || game.greetedOn === todayStr()) return;
     var pending = 0;
     state.lists.forEach(function (l) {
-      if (l.type === 'rotina') pending += l.items.filter(function (i) { return !i.done; }).length;
+      if (l.type === 'rotina' && scheduledToday(l)) pending += activeItems(l).filter(function (i) { return !i.done; }).length;
     });
     game.greetedOn = todayStr();
     saveGame();
@@ -1193,18 +1415,36 @@
   // Troca uma tarefa grande por passos menores (um por linha), na mesma posição.
   // O item original vai pra lixeira, então dá pra recuperar.
   function openSplitItem(list, item, back) {
+    var mode = 'steps'; // 'steps' (dentro da tarefa) | 'items' (tarefas separadas)
     openModal(
       '<h2>Dividir em passos</h2>' +
       '<p class="hint" style="margin:0;">Escreva um passo por linha. Passos pequenos e concretos são mais fáceis de começar.</p>' +
+      '<div class="chip-row">' +
+        '<button type="button" class="chip selected" data-mode="steps">Passos desta tarefa</button>' +
+        '<button type="button" class="chip" data-mode="items">Tarefas separadas</button>' +
+      '</div>' +
       '<textarea id="m-split-text" rows="5" placeholder="Ex.:&#10;Juntar a louça&#10;Lavar os copos&#10;Lavar as panelas"></textarea>' +
       '<div class="modal-actions"><button id="m-split-cancel" class="btn btn-secondary">Voltar</button>' +
       '<button id="m-split-save" class="btn btn-primary">Dividir</button></div>'
     );
+    modal.querySelectorAll('[data-mode]').forEach(function (el) {
+      el.addEventListener('click', function () {
+        mode = el.getAttribute('data-mode');
+        modal.querySelectorAll('[data-mode]').forEach(function (o) { o.classList.toggle('selected', o === el); });
+      });
+    });
     document.getElementById('m-split-cancel').addEventListener('click', back);
     document.getElementById('m-split-save').addEventListener('click', function () {
       var steps = document.getElementById('m-split-text').value.split('\n')
         .map(function (t) { return t.trim(); }).filter(Boolean).slice(0, 15);
       if (steps.length < 2) { alert('Escreva pelo menos 2 passos, um por linha.'); return; }
+      if (mode === 'steps') {
+        addSteps(item, steps.join('\n'));
+        save();
+        renderDetail();
+        back();
+        return;
+      }
       var idx = list.items.findIndex(function (i) { return i.id === item.id; });
       var newItems = steps.map(function (t) { return { id: uid(), text: t, done: false }; });
       moveItemToTrash(list, item);
@@ -1372,19 +1612,26 @@
     }
 
     state.lists.forEach(function (list) {
-      var total = list.items.length;
-      var done = list.items.filter(function (i) { return i.done; }).length;
+      var act = activeItems(list);
+      var total = act.length;
+      var done = act.filter(function (i) { return i.done; }).length;
+      var snoozedN = list.items.length - total;
+      var offToday = !scheduledToday(list);
       var pct = total === 0 ? 0 : Math.round((done / total) * 100);
 
       var card = document.createElement('div');
-      card.className = 'list-card' + (total > 0 && done === total ? ' complete' : '');
+      card.className = 'list-card' + (total > 0 && done === total ? ' complete' : '') + (offToday ? ' off-today' : '');
       card.style.setProperty('--hue', listHue(list.id));
       card.innerHTML =
         '<div class="emoji">' + list.emoji + '</div>' +
         '<div class="info">' +
           '<textarea class="name" rows="1" readonly></textarea>' +
-          '<div class="meta">' + (total === 0 ? 'Sem itens' : (total > 0 && done === total ? 'Tudo feito 🎉' : done + ' de ' + total + ' feitos')) +
-            (list.type === 'rotina' ? ' · diária' : '') + roleMeta(list) + '</div>' +
+          '<div class="meta">' + (list.items.length === 0 ? 'Sem itens' : (total === 0 ? 'Tudo adiado' : (done === total ? 'Tudo feito 🎉' : done + ' de ' + total + ' feitos'))) +
+            (snoozedN ? ' · ' + snoozedN + (snoozedN > 1 ? ' adiados' : ' adiado') : '') +
+            (offToday
+              ? ' · hoje não · volta ' + nextScheduledLabel(list)
+              : (list.type === 'rotina' && !snoozedN ? ' · ' + (list.days && list.days.length && list.days.length < 7 ? daysLabel(list).toLowerCase() : 'diária') : '')) +
+            roleMeta(list) + '</div>' +
           '<div class="progress-bar"><div style="width:' + pct + '%"></div></div>' +
         '</div>' +
         (canEditMeta(list) ? '<button class="edit-btn" aria-label="Renomear">' + ICONS.edit + '</button>' : '') +
@@ -1447,7 +1694,9 @@
     document.getElementById('detail-title').textContent = list.emoji + ' ' + list.name;
     var editable = canEditItems(list);
     var hint = list.type === 'rotina'
-      ? 'Lista diária: os itens desmarcam sozinhos todo dia à meia-noite.'
+      ? (list.days && list.days.length && list.days.length < 7
+          ? 'Rotina de ' + daysLabel(list).toLowerCase() + ': os itens desmarcam sozinhos à meia-noite.'
+          : 'Lista diária: os itens desmarcam sozinhos todo dia à meia-noite.')
       : 'Lista simples: marque os itens e use "Limpar concluídos" quando quiser.';
     if (list.role === 'viewer') hint = 'Você só pode ver esta lista (dono: ' + (list.ownerName || '?') + ').';
     else if (list.role === 'editor') hint = 'Você é editor: pode mexer nos itens. Dono: ' + (list.ownerName || '?') + '.';
@@ -1497,17 +1746,43 @@
     }
 
     visibleItems.forEach(function (item) {
+      var steps = item.steps || [];
+      var snoozed = isSnoozed(item);
+      var expanded = expandedItemId === item.id && (editable || steps.length > 0);
       var row = document.createElement('li');
-      row.className = 'item-row' + (item.done ? ' done' : '') + (item.id === justCheckedItemId ? ' just-done' : '');
+      row.className = 'item-row' + (item.done ? ' done' : '') + (snoozed ? ' snoozed' : '') +
+        (expanded ? ' expanded' : '') + (item.id === justCheckedItemId ? ' just-done' : '');
+
+      var chips = [];
+      if (steps.length) chips.push('<span class="chip-mini">' + (game.calm ? 'com passos' : stepsDoneCount(item) + '/' + steps.length + ' passos') + '</span>');
+      if (snoozed) chips.push('<span class="chip-mini warn">⏰ volta ' + snoozeWhen(item.snoozeUntil) + '</span>');
+      if (isPicked(list, item)) chips.push('<span class="chip-mini star">⭐ prioridade de hoje</span>');
+
       row.innerHTML =
-        '<div class="check" role="checkbox" aria-checked="' + (item.done ? 'true' : 'false') + '">' + (item.done ? ICONS.check : '') + '</div>' +
-        '<textarea class="text" rows="1" readonly></textarea>' +
-        (editable ? '<button class="edit-btn" aria-label="Editar texto">' + ICONS.edit + '</button>' : '') +
-        (canReorder ? '<button class="drag-handle" aria-label="Arrastar para reordenar">' + DRAG_ICON + '</button>' : '') +
-        (editable ? '<button class="delete" aria-label="Excluir">' + ICONS.trash + '</button>' : '');
+        '<div class="item-main">' +
+          '<div class="check" role="checkbox" aria-checked="' + (item.done ? 'true' : 'false') + '">' + (item.done ? ICONS.check : '') + '</div>' +
+          '<div class="item-body" role="button" aria-expanded="' + (expanded ? 'true' : 'false') + '" aria-label="Mostrar passos e opções da tarefa">' +
+            '<textarea class="text" rows="1" readonly></textarea>' +
+            (chips.length ? '<div class="item-meta">' + chips.join('') + '</div>' : '') +
+          '</div>' +
+          (editable ? '<button class="edit-btn" aria-label="Editar texto">' + ICONS.edit + '</button>' : '') +
+          (canReorder ? '<button class="drag-handle" aria-label="Arrastar para reordenar">' + DRAG_ICON + '</button>' : '') +
+          (editable ? '<button class="delete" aria-label="Excluir">' + ICONS.trash + '</button>' : '') +
+        '</div>';
 
       var textEl = row.querySelector('.text');
       textEl.value = item.text;
+
+      // tocar no texto abre/fecha o painel (passos, adiar, prioridade)
+      row.querySelector('.item-body').addEventListener('click', function () {
+        if (!textEl.readOnly) return;
+        if (Date.now() - recentDragEndAt < 300) return;
+        if (!editable && !steps.length) return;
+        expandedItemId = expanded ? null : item.id;
+        renderDetail();
+      });
+
+      if (expanded) row.appendChild(buildItemPanel(list, item, editable));
 
       if (!editable) {
         container.appendChild(row);
@@ -1539,7 +1814,8 @@
         }
       });
 
-      row.querySelector('.edit-btn').addEventListener('click', function () {
+      row.querySelector('.edit-btn').addEventListener('click', function (e) {
+        e.stopPropagation();
         textEl.readOnly = false;
         textEl.focus();
         textEl.setSelectionRange(textEl.value.length, textEl.value.length);
@@ -1558,7 +1834,98 @@
 
       container.appendChild(row);
       autoGrow(textEl);
+      if (expanded && focusStepInputFor === item.id) {
+        var inp = row.querySelector('.step-input');
+        if (inp) inp.focus();
+        focusStepInputFor = null;
+      }
     });
+  }
+
+  // Painel da tarefa: passos (subtarefas), prioridade do dia e adiar.
+  function buildItemPanel(list, item, editable) {
+    var panel = document.createElement('div');
+    panel.className = 'item-panel';
+    var steps = item.steps || [];
+    var html = '';
+    if (steps.length) {
+      html += '<ul class="step-list">' + steps.map(function (st, idx) {
+        return '<li class="step-row' + (st.done ? ' done' : '') + '" data-idx="' + idx + '">' +
+          '<div class="step-check" role="checkbox" aria-checked="' + (st.done ? 'true' : 'false') + '">' + (st.done ? ICONS.check : '') + '</div>' +
+          '<span class="step-text"></span>' +
+          (editable ? '<button class="step-del" type="button" aria-label="Remover passo">' + ICONS.x + '</button>' : '') +
+        '</li>';
+      }).join('') + '</ul>';
+    } else if (editable) {
+      html += '<p class="panel-hint">Divida em passos pequenos: fica mais fácil começar.</p>';
+    }
+    if (editable) {
+      html += '<div class="step-add">' +
+        '<input class="step-input" type="text" maxlength="100" placeholder="Adicionar um passo…" enterkeyhint="done" autocomplete="off">' +
+        '<button class="step-add-btn" type="button" aria-label="Adicionar passo">' + ICONS.plus + '</button></div>';
+      if (!item.done) {
+        html += '<div class="panel-actions">' +
+          '<button type="button" class="chip" data-act="pick">' + (isPicked(list, item) ? '⭐ Tirar das prioridades' : '⭐ Prioridade de hoje') + '</button>' +
+          (isSnoozed(item)
+            ? '<button type="button" class="chip" data-act="unsnooze">↩︎ Trazer de volta hoje</button>'
+            : '<button type="button" class="chip" data-act="snooze">⏰ Adiar</button>') +
+        '</div>' +
+        '<div class="snooze-options hidden">' +
+          '<button type="button" class="chip" data-days="1">Amanhã</button>' +
+          '<button type="button" class="chip" data-days="3">Em 3 dias</button>' +
+          '<button type="button" class="chip" data-days="7">Semana que vem</button>' +
+        '</div>';
+      }
+    }
+    panel.innerHTML = html;
+
+    panel.querySelectorAll('.step-row').forEach(function (r) {
+      var st = steps[parseInt(r.getAttribute('data-idx'), 10)];
+      r.querySelector('.step-text').textContent = st.text;
+      if (!editable) return;
+      r.querySelector('.step-check').addEventListener('click', function () {
+        toggleStep(list, item, st);
+        renderDetail();
+      });
+      r.querySelector('.step-del').addEventListener('click', function () {
+        item.steps = item.steps.filter(function (x) { return x.id !== st.id; });
+        if (!item.steps.length) delete item.steps;
+        save();
+        renderDetail();
+      });
+    });
+
+    if (!editable) return panel;
+
+    function submitSteps() {
+      var inp = panel.querySelector('.step-input');
+      if (!inp.value.trim()) return;
+      addSteps(item, inp.value);
+      save();
+      focusStepInputFor = item.id;
+      renderDetail();
+    }
+    panel.querySelector('.step-add-btn').addEventListener('click', submitSteps);
+    panel.querySelector('.step-input').addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') { e.preventDefault(); submitSteps(); }
+    });
+    panel.querySelector('.step-input').addEventListener('paste', function (e) {
+      var text = (e.clipboardData && e.clipboardData.getData('text')) || '';
+      if (/\n/.test(text.trim())) { e.preventDefault(); addSteps(item, text); save(); focusStepInputFor = item.id; renderDetail(); }
+    });
+
+    var pick = panel.querySelector('[data-act="pick"]');
+    if (pick) pick.addEventListener('click', function () { togglePick(list, item); renderDetail(); });
+    var un = panel.querySelector('[data-act="unsnooze"]');
+    if (un) un.addEventListener('click', function () { delete item.snoozeUntil; save(); renderDetail(); });
+    var sn = panel.querySelector('[data-act="snooze"]');
+    if (sn) sn.addEventListener('click', function () { panel.querySelector('.snooze-options').classList.toggle('hidden'); });
+    panel.querySelectorAll('[data-days]').forEach(function (el) {
+      el.addEventListener('click', function () {
+        snoozeItem(list, item, parseInt(el.getAttribute('data-days'), 10), renderDetail);
+      });
+    });
+    return panel;
   }
 
   // ---------- adicionar item (com sugestão de lista) ----------
@@ -1810,7 +2177,11 @@
   // ---------- menu da lista (⋯) ----------
 
   function buildShareText(list) {
-    var lines = list.items.map(function (i) { return (i.done ? '✅ ' : '⬜ ') + i.text; });
+    var lines = [];
+    list.items.forEach(function (i) {
+      lines.push((i.done ? '✅ ' : '⬜ ') + i.text);
+      (i.steps || []).forEach(function (st) { lines.push('    ' + (st.done ? '✔ ' : '◦ ') + st.text); });
+    });
     return list.emoji + ' ' + list.name + '\n' + (lines.length ? lines.join('\n') : '(sem itens)');
   }
 
@@ -1901,6 +2272,9 @@
           '<div class="settings-row"><span>Ícone</span><button id="m-change-icon" class="btn btn-secondary">' + list.emoji + ' Trocar</button></div>' +
           '<div class="settings-row"><span>Tipo</span><button id="m-change-type" class="btn btn-secondary">' +
             (list.type === 'rotina' ? 'Rotina diária' : 'Lista simples') + '</button></div>' +
+          (list.type === 'rotina'
+            ? '<div class="settings-row"><span>Dias da semana</span><button id="m-days" class="btn btn-secondary">' + daysLabel(list) + '</button></div>'
+            : '') +
           '<div class="settings-row"><span>Ordenar por</span><button id="m-sort-order" class="btn btn-secondary">' +
             SORT_LABELS[list.sortOrder] + '</button></div>' +
           '<div class="settings-row"><span>Nome</span><button id="m-rename" class="btn btn-secondary">Renomear</button></div>' +
@@ -2011,6 +2385,7 @@
 
     on('m-share', function () { shareList(list); });
     on('m-reward', function () { openRewardEditor(list); });
+    on('m-days', function () { openDaysPicker(list); });
     on('m-duplicate', function () {
       var copy = duplicateList(list);
       closeModal();
@@ -2362,7 +2737,7 @@
   // reminder fica de fora: é por pessoa/aparelho, nunca sincroniza.
   function listData(list) {
     return {
-      name: list.name, emoji: list.emoji, type: list.type,
+      name: list.name, emoji: list.emoji, type: list.type, days: list.days,
       sortOrder: list.sortOrder, items: list.items, lastResetDate: list.lastResetDate
     };
   }
@@ -2373,7 +2748,7 @@
 
   function isEditingText() {
     var el = document.activeElement;
-    return !!(el && el.tagName === 'TEXTAREA' && !el.readOnly);
+    return !!(el && ((el.tagName === 'TEXTAREA' && !el.readOnly) || (el.tagName === 'INPUT' && el.classList.contains('step-input'))));
   }
 
   function rerender() {
@@ -2395,6 +2770,7 @@
     list.name = d.name;
     list.emoji = d.emoji;
     list.type = d.type;
+    if (d.days && d.days.length) list.days = d.days; else delete list.days;
     // reminder não vem do servidor: é local por pessoa (ensureReminderDefaults cuida do padrão).
     list.sortOrder = d.sortOrder || 'manual';
     list.items = d.items;
@@ -2434,7 +2810,7 @@
     var local = listData(list);
     var d = rec.data;
     var merged = {};
-    ['name', 'emoji', 'type', 'sortOrder', 'lastResetDate'].forEach(function (f) {
+    ['name', 'emoji', 'type', 'days', 'sortOrder', 'lastResetDate'].forEach(function (f) {
       var changedHere = list.base && canon(local[f]) !== canon(base[f]);
       merged[f] = changedHere ? local[f] : d[f];
     });
@@ -2453,6 +2829,7 @@
           // o servidor mantém o nome/ícone/etc. do dono
           var d = res.data.data;
           list.name = d.name; list.emoji = d.emoji; list.type = d.type;
+          if (d.days && d.days.length) list.days = d.days; else delete list.days;
           list.sortOrder = d.sortOrder || list.sortOrder;
           list.base = clone(d);
         } else {
@@ -3092,9 +3469,10 @@
     state.lists
       .filter(function (l) { return l.reminder && l.reminder.enabled && l.reminder.times.length; })
       .forEach(function (l) {
-        var hasPending = l.items.some(function (i) { return !i.done; });
+        // fora dos dias da rotina não há o que lembrar (o Worker também filtra por "days")
+        var hasPending = scheduledToday(l) && activeItems(l).some(function (i) { return !i.done; });
         l.reminder.times.forEach(function (t) {
-          out.push({ listId: l.id, listName: l.name, emoji: l.emoji, time: t, enabled: true, hasPending: hasPending });
+          out.push({ listId: l.id, listName: l.name, emoji: l.emoji, time: t, enabled: true, hasPending: hasPending, days: l.days || [] });
         });
       });
     return out;

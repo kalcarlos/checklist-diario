@@ -49,7 +49,12 @@ function runSuite(file) {
       console.log(`${r.code === 0 ? 'ok  ' : 'FALHOU'} ${f}  (${summary}, ${secs}s)`);
       if (r.code !== 0) {
         failed++;
-        if (!VERBOSE) console.log(r.out.split('\n').filter((l) => /FAIL|Error|✗|falhas/.test(l)).map((l) => '    ' + l).join('\n'));
+        // mostra as linhas FAIL e o final da saída (a mensagem do erro, com o seletor que travou)
+        if (!VERBOSE) {
+          const lines = r.out.split('\n');
+          const fails = lines.filter((l) => /FAIL|✗/.test(l));
+          console.log(fails.concat(['    ...'], lines.slice(-14)).map((l) => '    ' + l).join('\n'));
+        }
       }
     }
   } finally {

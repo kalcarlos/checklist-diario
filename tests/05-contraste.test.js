@@ -38,6 +38,8 @@ async function measureAll(p, scheme, label, bad, counter, includeControl) {
     });
     return out;
   }, includeControl);
+  // o controle só serve para a 1ª medição; depois sai da frente (senão intercepta cliques conforme o layout)
+  if (includeControl) await p.evaluate(() => { const e = document.getElementById('controle-contraste'); if (e) e.remove(); });
   let controlCaught = false;
   res.forEach((r) => {
     counter.n++;
@@ -61,15 +63,27 @@ async function measureAll(p, scheme, label, bad, counter, includeControl) {
     await p.evaluate(() => {
       localStorage.setItem('checklist-diario:skipLogin', '1');
       const d = (n) => { const x = new Date(); x.setDate(x.getDate() - n); return x.getFullYear() + '-' + String(x.getMonth() + 1).padStart(2, '0') + '-' + String(x.getDate()).padStart(2, '0'); };
-      const mk = (id, name, emoji, type, items, done) => ({ id, name, emoji, type, items: items.map((t, i) => ({ id: id + i, text: t, done: i < done })), sortOrder: 'manual', reminder: { enabled: false, times: [] } });
-      localStorage.setItem('checklist-diario:v1', JSON.stringify({ lastResetDate: d(0), wordListStats: {}, trash: [], lists: [mk('c', 'Casa', '🏠', 'rotina', ['Lavar a louça', 'Passear', 'Regar'], 1), mk('m', 'Mercado', '🛒', 'lista', ['Leite'], 1)] }));
-      localStorage.setItem('checklist-diario:game', JSON.stringify({ enabled: true, onboarded: true, badges: { first: 'x' }, total: 3, listsDone: 1, greetedOn: d(0), days: { [d(0)]: 1 } }));
+      const mk = (id, name, emoji, type, items, done, extra) => Object.assign({ id, name, emoji, type, items: items.map((t, i) => (typeof t === 'string' ? { id: id + i, text: t, done: i < done } : t)), sortOrder: 'manual', reminder: { enabled: false, times: [] } }, extra || {});
+      const other = [0, 1, 2, 3, 4, 5, 6].filter((x) => x !== new Date().getDay()).slice(0, 2);
+      localStorage.setItem('checklist-diario:v1', JSON.stringify({ lastResetDate: d(0), wordListStats: {}, trash: [], lists: [
+        mk('c', 'Casa', '🏠', 'rotina', [
+          { id: 'a', text: 'Arrumar o quarto', done: false, steps: [{ id: 's1', text: 'Guardar a roupa', done: true }, { id: 's2', text: 'Arrumar a cama', done: false }] },
+          { id: 'b', text: 'Pagar a conta de luz', done: false, snoozeUntil: d(-1) },
+          { id: 'c', text: 'Regar as plantas', done: false }, { id: 'd', text: 'Passear', done: true }], 0),
+        mk('m', 'Mercado', '🛒', 'lista', ['Leite'], 1),
+        mk('g', 'Academia', '🏋️', 'rotina', ['Treino'], 0, { days: other })] }));
+      localStorage.setItem('checklist-diario:game', JSON.stringify({ enabled: true, onboarded: true, badges: { first: 'x' }, total: 3, listsDone: 1, greetedOn: d(0), days: { [d(0)]: 1 }, picks: { date: d(0), ids: [{ l: 'c', i: 'c' }] } }));
     });
     await p.reload(); await p.waitForTimeout(500);
     await p.evaluate(() => document.getElementById('modal-backdrop').classList.add('hidden'));
     const hideModal = () => p.evaluate(() => document.getElementById('modal-backdrop').classList.add('hidden'));
     control = (await measureAll(p, scheme, 'home', bad, counter, true)) && control;
     await p.click('.list-card'); await p.waitForTimeout(500); await measureAll(p, scheme, 'lista', bad, counter);
+    await p.click('.item-row:nth-child(1) .item-body'); await p.waitForTimeout(150); await measureAll(p, scheme, 'item com painel e passos', bad, counter);
+    await p.click('.item-row:nth-child(3) .item-body'); await p.waitForTimeout(150);
+    await p.click('[data-act="snooze"]'); await p.waitForTimeout(100); await measureAll(p, scheme, 'painel com adiar', bad, counter);
+    await p.click('.item-row:nth-child(3) .item-body'); await p.waitForTimeout(100);
+    await p.click('#btn-focus'); await p.waitForTimeout(450); await measureAll(p, scheme, 'foco com passos', bad, counter); await hideModal();
     await p.click('#btn-list-menu'); await p.waitForTimeout(500); await measureAll(p, scheme, 'menu da lista', bad, counter); await hideModal();
     await p.click('#btn-back'); await p.waitForTimeout(450);
     await p.click('#btn-settings'); await p.waitForTimeout(500); await measureAll(p, scheme, 'ajustes', bad, counter); await hideModal();

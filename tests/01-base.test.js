@@ -113,7 +113,7 @@ const dk=n=>{const d=new Date();const x=new Date(d.getFullYear(),d.getMonth(),d.
  console.log('6. Dividir em passos');
  p=await fresh();
  await boot(p,null,mkState([mkList('l1','Casa','rotina',['limpar casa','outro'])]));
- await p.click('.list-card'); await p.click('#btn-focus'); await p.click('#m-focus-split'); await p.waitForTimeout(100);
+ await p.click('.list-card'); await p.click('#btn-focus'); await p.click('#m-focus-split'); await p.click('[data-mode="items"]'); await p.waitForTimeout(100);
  p.once('dialog',d=>{ ok('exige 2+ passos (alerta)',/pelo menos 2/.test(d.message())); d.accept(); });
  await p.fill('#m-split-text','só um'); await p.click('#m-split-save'); await p.waitForTimeout(100);
  await p.fill('#m-split-text','  passo 1 \n\n passo 2\npasso 3  '); await p.click('#m-split-save'); await p.waitForTimeout(200);
@@ -125,7 +125,7 @@ const dk=n=>{const d=new Date();const x=new Date(d.getFullYear(),d.getMonth(),d.
  ok('original na lixeira (recuperável)',trash.includes('limpar casa'),trash);
  p=await fresh();
  await boot(p,null,mkState([mkList('l1','Casa','rotina',['x'])]));
- await p.click('.list-card'); await p.click('#btn-focus'); await p.click('#m-focus-split');
+ await p.click('.list-card'); await p.click('#btn-focus'); await p.click('#m-focus-split'); await p.click('[data-mode="items"]');
  await p.fill('#m-split-text',Array.from({length:20},(_,i)=>'p'+i).join('\n')); await p.click('#m-split-save'); await p.waitForTimeout(150);
  await p.click('#m-cancel'); ok('limite de 15 passos',(await p.$$('.item-row')).length===15);
  await p.click('#btn-focus'); await p.click('#m-focus-split'); await p.click('#m-split-cancel'); await p.waitForTimeout(100);

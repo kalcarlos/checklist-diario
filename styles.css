@@ -896,3 +896,66 @@ svg.i.sm { width: 18px; height: 18px; }
 .game-toast.above { bottom: calc(164px + var(--safe-bottom)); }
 .chip-row.scroll { flex-wrap: nowrap; overflow-x: auto; margin: 0 calc(-1 * var(--s-5)); padding: 2px var(--s-5); -webkit-overflow-scrolling: touch; scroll-snap-type: x proximity; }
 .chip-row.scroll .chip { flex: none; scroll-snap-align: start; }
+
+/* Lote 2: passos, adiar, dias da semana, prioridades */
+.item-row { flex-direction: column; align-items: stretch; gap: 0; padding: 0; }
+.item-main { display: flex; align-items: center; gap: var(--s-2); padding: var(--s-3) var(--s-1) var(--s-3) var(--s-3); min-height: 56px; }
+.item-body { flex: 1; min-width: 0; cursor: pointer; }
+.item-body .text { display: block; width: 100%; }
+.item-meta { display: flex; flex-wrap: wrap; gap: var(--s-1) var(--s-2); margin-top: 2px; }
+.chip-mini {
+  font-size: var(--fs-xs); font-weight: 650; line-height: 1.5;
+  color: var(--text-dim); background: var(--surface-2);
+  padding: 1px 9px; border-radius: var(--r-pill);
+}
+.chip-mini.warn, .chip-mini.star { color: var(--text); background: color-mix(in srgb, var(--warm) 24%, var(--surface)); }
+.item-row.snoozed { border-style: dashed; background: transparent; box-shadow: none; }
+.item-row.snoozed .item-body .text { color: var(--text-dim); }
+
+.item-panel {
+  display: flex; flex-direction: column; gap: var(--s-2);
+  padding: 0 var(--s-3) var(--s-3) calc(var(--s-3) + 28px + var(--s-2));
+}
+.step-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.step-row { display: flex; align-items: center; gap: var(--s-2); min-height: 40px; }
+.step-check {
+  position: relative; flex-shrink: 0; width: 22px; height: 22px; border-radius: 50%;
+  border: 2px solid var(--text-faint); display: flex; align-items: center; justify-content: center;
+  color: transparent; cursor: pointer;
+  transition: background var(--dur-2) var(--ease), border-color var(--dur-2) var(--ease);
+}
+.step-check::after { content: ""; position: absolute; inset: -10px; }
+.step-check svg.i { width: 13px; height: 13px; stroke-width: 3; }
+.step-row.done .step-check, .focus-step.done .step-check { background: var(--done); border-color: var(--done); color: var(--on-done); }
+.step-text { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: var(--fs-md); }
+.step-row.done .step-text, .focus-step.done .step-text { color: var(--text-dim); text-decoration: line-through; text-decoration-color: var(--text-faint); }
+.step-del {
+  flex: none; width: 36px; height: 36px; border: none; background: none; color: var(--text-faint);
+  display: flex; align-items: center; justify-content: center; border-radius: var(--r-sm); cursor: pointer;
+}
+.step-del:active { background: var(--danger-soft); color: var(--danger); }
+.step-add { display: flex; gap: var(--s-2); }
+.step-input {
+  flex: 1; min-width: 0; min-height: 42px; padding: 0 var(--s-3);
+  border-radius: var(--r-md); border: 1px solid transparent; background: var(--surface-2);
+  color: var(--text); font-size: 16px; font-family: inherit;
+}
+.step-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); outline: none; }
+.step-add-btn {
+  flex: none; width: 42px; height: 42px; border: none; border-radius: var(--r-md);
+  background: var(--accent); color: var(--on-accent); display: flex; align-items: center; justify-content: center; cursor: pointer;
+}
+.panel-hint { margin: 0; color: var(--text-dim); font-size: var(--fs-sm); }
+.panel-actions, .snooze-options { display: flex; flex-wrap: wrap; gap: var(--s-2); }
+.snooze-options.hidden { display: none; }
+
+.list-card.off-today { border-style: dashed; box-shadow: none; }
+.list-card.off-today .emoji { filter: grayscale(.7); }
+
+.today-title { display: flex; align-items: center; justify-content: space-between; }
+.link-btn { background: none; border: none; color: var(--accent); font-size: var(--fs-xs); font-weight: 700; text-transform: none; letter-spacing: 0; cursor: pointer; padding: var(--s-1) 0; }
+
+.focus-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--s-2); }
+.focus-step { display: flex; align-items: center; gap: var(--s-3); min-height: 46px; padding: 0 var(--s-3); background: var(--surface-2); border-radius: var(--r-md); cursor: pointer; }
+.focus-actions #m-cancel { grid-column: 1 / -1; }
+.item-row, .list-card, .today-row { flex-shrink: 0; }
