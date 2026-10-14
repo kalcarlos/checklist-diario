@@ -7,8 +7,9 @@ const { chromium } = require('playwright');
 
 const URL = process.env.TEST_URL || 'http://localhost:4205';
 
-function launchBrowser() {
+function launchBrowser(extraArgs) {
   const opts = {};
+  if (extraArgs && extraArgs.length) opts.args = extraArgs;
   if (process.env.PW_CHROMIUM) opts.executablePath = process.env.PW_CHROMIUM;
   return chromium.launch(opts);
 }
