@@ -604,6 +604,7 @@
     g.listsDone = g.listsDone || 0;
     if (!g.rewards || typeof g.rewards !== 'object') g.rewards = {};
     if (!g.rewardShown || typeof g.rewardShown !== 'object') g.rewardShown = {};
+    if (!g.sound || typeof g.sound !== 'object') g.sound = { on: false, kind: 'chuva', vol: 50 };
     return g;
   }
 
@@ -882,14 +883,252 @@
 
   // Pausa guiada de ~1 minuto: inspira 4s, solta 6s, 6 vezes. Respeita
   // "reduzir movimento" (o texto continua guiando, só some a animação).
+  // ---------- som relaxante (gerado no aparelho com a Web Audio API) ----------
+  // Sem arquivos de áudio: funciona offline e não pesa. Desligado por padrão, só
+  // toca depois de um toque da pessoa, acompanha a respiração (sobe ao inspirar,
+  // desce ao soltar o ar) e para sozinho ao fechar a pausa.
+
+  var SOUND_KINDS = [
+    { key: 'chuva', label: '🌧️ Chuva suave' },
+    { key: 'ondas', label: '🌊 Ondas' },
+    { key: 'tom', label: '🎵 Tom calmo' }
+  ];
+  var ambient = { ctx: null, master: null, node: null, silent: null, watch: null };
+
+  function soundSupported() { return !!(window.AudioContext || window.webkitAudioContext); }
+
+  function soundPrefs() {
+    if (!game.sound) game.sound = { on: false, kind: 'chuva', vol: 50 };
+    return game.sound;
+  }
+
+  // volume 0-100 -> ganho (curva quadrática: mais fino nos volumes baixos)
+  function volumeGain() {
+    var v = Math.max(0, Math.min(100, soundPrefs().vol)) / 100;
+    return v * v * 0.9;
+  }
+
+  function audioCtx() {
+    if (!ambient.ctx) {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return null;
+      try { ambient.ctx = new AC(); } catch (e) { return null; }
+      ambient.master = ambient.ctx.createGain();
+      ambient.master.gain.value = 0;
+      ambient.master.connect(ambient.ctx.destination);
+    }
+    return ambient.ctx;
+  }
+
+  // Ruído em laço sem "clique" na emenda (crossfade nas pontas). brown = mais grave.
+  function makeNoiseBuffer(ctx, brown) {
+    var len = Math.floor(ctx.sampleRate * 4);
+    var fade = Math.floor(ctx.sampleRate * 0.15);
+    var buf = ctx.createBuffer(1, len, ctx.sampleRate);
+    var out = buf.getChannelData(0);
+    var x = new Float32Array(len + fade);
+    var last = 0, peak = 0, i;
+    for (i = 0; i < x.length; i++) {
+      var w = Math.random() * 2 - 1;
+      if (brown) { last = (last + 0.02 * w) / 1.02; x[i] = last; } else { x[i] = w; }
+      if (Math.abs(x[i]) > peak) peak = Math.abs(x[i]);
+    }
+    for (i = 0; i < len; i++) {
+      var v = x[i];
+      if (i < fade) { var t = i / fade; v = x[i] * t + x[len + i] * (1 - t); }
+      out[i] = (v / (peak || 1)) * 0.9;
+    }
+    return buf;
+  }
+
+  function buildSound(ctx, kind) {
+    var bus = ctx.createGain();     // fade na troca de som e no fim
+    bus.gain.value = 0;
+    var swell = ctx.createGain();   // acompanha a respiração
+    swell.gain.value = 0.55;
+    swell.connect(bus);
+    var sources = [];
+
+    function noise(brown) {
+      var src = ctx.createBufferSource();
+      src.buffer = makeNoiseBuffer(ctx, brown);
+      src.loop = true;
+      src.start();
+      sources.push(src);
+      return src;
+    }
+
+    if (kind === 'chuva') {
+      var hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 500;
+      var lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 5000;
+      var lvl = ctx.createGain(); lvl.gain.value = 0.22; // ruído branco é áspero: fica baixo
+      noise(false).connect(hp); hp.connect(lp); lp.connect(lvl); lvl.connect(swell);
+    } else if (kind === 'ondas') {
+      var lpw = ctx.createBiquadFilter(); lpw.type = 'lowpass'; lpw.frequency.value = 1100;
+      var wave = ctx.createGain(); wave.gain.value = 0.8;
+      var lfo = ctx.createOscillator(); lfo.frequency.value = 0.11; // marola de ~9s
+      var amt = ctx.createGain(); amt.gain.value = 0.3;
+      lfo.connect(amt); amt.connect(wave.gain); lfo.start(); sources.push(lfo);
+      noise(true).connect(lpw); lpw.connect(wave); wave.connect(swell);
+    } else {
+      var lpt = ctx.createBiquadFilter(); lpt.type = 'lowpass'; lpt.frequency.value = 1400;
+      [220, 329.63, 440].forEach(function (f, k) { // lá, mi, lá: quinta aberta, sem tensão
+        var o = ctx.createOscillator(); o.type = 'sine'; o.frequency.value = f; o.detune.value = (k - 1) * 5;
+        var g = ctx.createGain(); g.gain.value = k === 0 ? 0.4 : 0.25;
+        o.connect(g); g.connect(lpt); o.start(); sources.push(o);
+      });
+      lpt.connect(swell);
+    }
+
+    return {
+      bus: bus,
+      breathe: function (inhale, ms) {
+        var t = ctx.currentTime;
+        swell.gain.cancelScheduledValues(t);
+        swell.gain.setValueAtTime(swell.gain.value, t);
+        swell.gain.linearRampToValueAtTime(inhale ? 1 : 0.4, t + ms / 1000);
+      },
+      fadeIn: function (sec) {
+        var t = ctx.currentTime;
+        bus.gain.cancelScheduledValues(t);
+        bus.gain.setValueAtTime(bus.gain.value, t);
+        bus.gain.linearRampToValueAtTime(1, t + sec);
+      },
+      fadeOut: function (sec) {
+        var t = ctx.currentTime;
+        bus.gain.cancelScheduledValues(t);
+        bus.gain.setValueAtTime(bus.gain.value, t);
+        bus.gain.linearRampToValueAtTime(0, t + sec);
+      },
+      stop: function () {
+        sources.forEach(function (src) { try { src.stop(); } catch (e) {} });
+        try { bus.disconnect(); } catch (e) {}
+      }
+    };
+  }
+
+  // iOS: o botão lateral de silêncio costuma mudo a Web Audio. Dois jeitos de
+  // pedir "reprodução": a Audio Session API (Safari 16.4+) e um áudio mudo em laço.
+  function silentWavUrl() {
+    var rate = 8000, n = 8000, buf = new Uint8Array(44 + n), dv = new DataView(buf.buffer), i;
+    function str(off, t) { for (i = 0; i < t.length; i++) buf[off + i] = t.charCodeAt(i); }
+    str(0, 'RIFF'); dv.setUint32(4, 36 + n, true); str(8, 'WAVE'); str(12, 'fmt ');
+    dv.setUint32(16, 16, true); dv.setUint16(20, 1, true); dv.setUint16(22, 1, true);
+    dv.setUint32(24, rate, true); dv.setUint32(28, rate, true); dv.setUint16(32, 1, true); dv.setUint16(34, 8, true);
+    str(36, 'data'); dv.setUint32(40, n, true);
+    for (i = 0; i < n; i++) buf[44 + i] = 128;
+    return URL.createObjectURL(new Blob([buf], { type: 'audio/wav' }));
+  }
+
+  function keepAudioSession() {
+    try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch (e) {}
+    try {
+      if (!ambient.silent) {
+        ambient.silent = new Audio(silentWavUrl());
+        ambient.silent.loop = true;
+      }
+      var pr = ambient.silent.play();
+      if (pr && pr.catch) pr.catch(function () {});
+    } catch (e) {}
+  }
+
+  function applyVolume(fast) {
+    if (!ambient.ctx || !ambient.master) return;
+    var t = ambient.ctx.currentTime;
+    ambient.master.gain.cancelScheduledValues(t);
+    ambient.master.gain.setTargetAtTime(volumeGain(), t, fast ? 0.05 : 0.4);
+  }
+
+  function startAmbient(kind) {
+    var ctx = audioCtx();
+    if (!ctx) return false;
+    keepAudioSession();
+    try { if (ctx.state === 'suspended' && ctx.resume) ctx.resume(); } catch (e) {}
+    var old = ambient.node;
+    if (old) { old.fadeOut(0.5); setTimeout(function () { old.stop(); }, 700); }
+    ambient.node = buildSound(ctx, kind);
+    ambient.node.bus.connect(ambient.master);
+    ambient.node.fadeIn(old ? 0.6 : 1.5);
+    applyVolume(false);
+    if (!ambient.watch) {
+      // some sozinho quando a pausa de respirar fecha (por qualquer caminho)
+      ambient.watch = setInterval(function () {
+        if (!document.getElementById('breath-circle') || document.hidden) stopAmbient(0.6);
+      }, 250);
+    }
+    return true;
+  }
+
+  function stopAmbient(fadeSec) {
+    if (ambient.watch) { clearInterval(ambient.watch); ambient.watch = null; }
+    var node = ambient.node;
+    ambient.node = null;
+    if (node) {
+      node.fadeOut(fadeSec);
+      setTimeout(function () { node.stop(); }, fadeSec * 1000 + 150);
+    }
+    setTimeout(function () {
+      if (!ambient.node && ambient.silent) { try { ambient.silent.pause(); } catch (e) {} }
+    }, fadeSec * 1000 + 200);
+  }
+
+  document.addEventListener('visibilitychange', function () { if (document.hidden && ambient.node) stopAmbient(0.2); });
+
+  function soundBoxHtml() {
+    if (!soundSupported()) return '';
+    var pr = soundPrefs();
+    return '<div class="settings-group sound-box">' +
+      '<div class="settings-row"><span>🔈 Som relaxante</span>' +
+        '<button id="m-sound-toggle" class="switch" role="switch" aria-label="Som relaxante" aria-checked="' + (pr.on ? 'true' : 'false') + '"><span></span></button></div>' +
+      '<div id="m-sound-more" class="' + (pr.on ? '' : 'hidden') + '">' +
+        '<div class="chip-row">' + SOUND_KINDS.map(function (k) {
+          return '<button type="button" class="chip' + (pr.kind === k.key ? ' selected' : '') + '" data-kind="' + k.key + '">' + k.label + '</button>';
+        }).join('') + '</div>' +
+        '<label class="vol-row"><span>Volume</span><input id="m-sound-vol" type="range" min="0" max="100" step="5" value="' + pr.vol + '" aria-label="Volume do som"></label>' +
+        '<p class="hint">Começa baixinho e some sozinho quando você fecha. Com fones fica melhor.</p>' +
+      '</div></div>';
+  }
+
+  function bindSoundBox() {
+    var toggle = document.getElementById('m-sound-toggle');
+    if (!toggle) return;
+    var pr = soundPrefs();
+    var more = document.getElementById('m-sound-more');
+    toggle.addEventListener('click', function () {
+      pr.on = !pr.on;
+      saveGame();
+      toggle.setAttribute('aria-checked', pr.on ? 'true' : 'false');
+      more.classList.toggle('hidden', !pr.on);
+      if (pr.on) startAmbient(pr.kind); else stopAmbient(0.8);
+    });
+    modal.querySelectorAll('[data-kind]').forEach(function (el) {
+      el.addEventListener('click', function () {
+        pr.kind = el.getAttribute('data-kind');
+        saveGame();
+        modal.querySelectorAll('[data-kind]').forEach(function (o) { o.classList.toggle('selected', o === el); });
+        if (pr.on) startAmbient(pr.kind);
+      });
+    });
+    var vol = document.getElementById('m-sound-vol');
+    vol.addEventListener('input', function () { pr.vol = parseInt(vol.value, 10); applyVolume(true); });
+    vol.addEventListener('change', function () { saveGame(); });
+  }
+
   function openBreathing(back) {
     openModal(
       '<h2>Respirar um pouco</h2>' +
       '<div id="breath-circle" class="breath-circle"></div>' +
       '<p id="breath-text" class="focus-text" style="padding:8px;">Fique confortável…</p>' +
+      soundBoxHtml() +
       '<button id="m-cancel" class="btn btn-secondary">Fechar</button>'
     );
-    document.getElementById('m-cancel').addEventListener('click', back || closeModal);
+    document.getElementById('m-cancel').addEventListener('click', function () {
+      stopAmbient(0.6);
+      (back || closeModal)();
+    });
+    bindSoundBox();
+    // este código roda dentro do toque que abriu a pausa: o navegador deixa tocar
+    if (soundSupported() && soundPrefs().on) startAmbient(soundPrefs().kind);
     var CYCLES = 6;
     function step(i) {
       var circle = document.getElementById('breath-circle');
@@ -898,6 +1137,7 @@
       if (i >= CYCLES * 2) {
         circle.className = 'breath-circle';
         text.textContent = 'Pronto. Volte quando quiser 🌱';
+        stopAmbient(3);
         return;
       }
       var inhale = i % 2 === 0;
@@ -905,6 +1145,7 @@
       circle.style.transitionDuration = ms + 'ms';
       circle.className = 'breath-circle' + (inhale ? ' in' : '');
       text.textContent = inhale ? 'Inspire pelo nariz…' : 'Solte o ar devagar…';
+      if (ambient.node) ambient.node.breathe(inhale, ms);
       setTimeout(function () { step(i + 1); }, ms);
     }
     setTimeout(function () { step(0); }, 1200);
