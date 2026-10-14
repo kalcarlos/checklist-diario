@@ -89,6 +89,9 @@ async function measureAll(p, scheme, label, bad, counter, includeControl) {
     await p.click('#btn-settings'); await p.waitForTimeout(500); await measureAll(p, scheme, 'ajustes', bad, counter); await hideModal();
     await p.click('#btn-game-history'); await p.waitForTimeout(500); await measureAll(p, scheme, 'histórico', bad, counter); await hideModal();
     await p.click('#btn-new-list'); await p.waitForTimeout(500); await measureAll(p, scheme, 'nova lista', bad, counter); await hideModal();
+    await p.click('#btn-breathe'); await p.waitForTimeout(500); await measureAll(p, scheme, 'respirar (som desligado)', bad, counter);
+    await p.click('#m-sound-toggle'); await p.waitForTimeout(400); await measureAll(p, scheme, 'respirar (som ligado)', bad, counter);
+    await p.click('#m-cancel'); await p.waitForTimeout(300);
     await c.close();
   }
   await b.close();

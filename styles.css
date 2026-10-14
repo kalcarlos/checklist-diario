@@ -967,3 +967,11 @@ svg.i.sm { width: 18px; height: 18px; }
 .sound-box .hint { padding: 0; margin: 0; }
 .vol-row { display: flex; align-items: center; gap: var(--s-3); font-size: var(--fs-sm); font-weight: 600; color: var(--text-dim); }
 .vol-row input[type="range"] { flex: 1; min-height: 32px; accent-color: var(--accent); }
+
+/* acabamento do som e da folha */
+.modal > * { flex-shrink: 0; }   /* a folha rola; nada dentro dela deve encolher (a bolinha virava elipse) */
+.sound-box .settings-row { border-bottom: none; }
+.sound-box #m-sound-more:not(.hidden) { border-top: 1px solid var(--border); padding-top: var(--s-3); }
+.sound-box .chip { background: var(--surface); }
+.sound-box .chip.selected { background: var(--accent-soft); }
+.modal label.vol-row { flex-direction: row; }

@@ -72,6 +72,7 @@ O lembrete diário de cada lista é por pessoa: numa lista compartilhada, cada u
 - **Adiar** (painel da tarefa ou modo foco): amanhã, em 3 dias ou semana que vem. A tarefa sai das contagens, do "Para agora" e do foco e volta sozinha na data; dá para trazer de volta antes. Tem "Desfazer".
 - **Rotina por dias da semana** (menu da rotina → Dias da semana): fora desses dias o cartão fica tracejado ("hoje não · volta qua"), a rotina não entra em "Para agora" nem na saudação. O lembrete push só respeita os dias depois de publicar o Worker atualizado (`push-server/`); sem isso ele continua avisando todo dia, como antes.
 - **Prioridades do dia** (⭐ no painel da tarefa): escolha até 3; "Para agora" passa a mostrar só as escolhidas até o fim do dia ("Limpar escolhas" volta ao automático). Ficam só neste aparelho.
+- **Som relaxante no "Respirar um pouco"** (home e modo foco): chuva suave, ondas ou tom calmo, gerados no próprio aparelho (sem arquivos, funciona offline), que sobem ao inspirar e descem ao soltar o ar. Desligado por padrão, só toca depois de um toque seu, tem volume, entra e sai com fade e para sozinho ao fechar a pausa ou ao ir para segundo plano. No iPhone o botão lateral de silêncio pode calar o som; o app pede reprodução ao sistema (Audio Session) e usa um áudio mudo de apoio, mas se ainda assim ficar mudo, confira esse botão e o volume.
 
 - **Busca** (🔍 na home): procura um texto em todos os itens de todas as listas.
 - **Ordenar por** (menu ⋯ da lista): manual (arrastar), alfabética, ou pendentes primeiro. Arrastar só funciona no modo manual.
