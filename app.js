@@ -469,6 +469,290 @@
     else localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   }
 
+  // ---------- progresso e feedback (gamificação leve) ----------
+  // Guardado à parte do estado das listas (não sincroniza nem entra no
+  // backup): é só um histórico pessoal por aparelho. Sem punição: nunca
+  // há contador que "zera" por um dia perdido.
+
+  var GAME_KEY = 'checklist-diario:game';
+  var GAME_KEEP_DAYS = 120;
+  var CELEBRATIONS = [
+    'Lista completa! 🎉', 'Mandou bem! ✨', 'Tudo feito, parabéns! 🙌', 'Missão cumprida! 🚀',
+    'Que capricho! 🌟', 'Uma a menos na cabeça! 😌', 'Arrasou! 💪', 'Feito é melhor que perfeito! 👏'
+  ];
+  // Conquistas: permanentes (nunca se perdem) e só aparecem como celebração.
+  var BADGES = [
+    { id: 'first', icon: '🌱', name: 'Primeiro passo', hint: 'Marque um item', test: function (g) { return g.total >= 1; } },
+    { id: 'list1', icon: '🎯', name: 'Lista completa', hint: 'Termine uma lista inteira', test: function (g) { return g.listsDone >= 1; } },
+    { id: 'week3', icon: '📅', name: '3 dias na semana', hint: '3 dias ativos em 7 dias', test: function () { return activeDaysLast7() >= 3; } },
+    { id: 'week5', icon: '🔥', name: '5 dias na semana', hint: '5 dias ativos em 7 dias', test: function () { return activeDaysLast7() >= 5; } },
+    { id: 'streak7', icon: '🏆', name: 'Sequência de 7', hint: '7 dias seguidos (com perdão)', test: function () { return currentStreak() >= 7; } },
+    { id: 'total50', icon: '⭐', name: '50 itens feitos', hint: 'Faça 50 itens', test: function (g) { return g.total >= 50; } },
+    { id: 'total200', icon: '💎', name: '200 itens feitos', hint: 'Faça 200 itens', test: function (g) { return g.total >= 200; } }
+  ];
+  var justCheckedItemId = null;
+  var game = loadGame();
+
+  function loadGame() {
+    var g = null;
+    try { g = JSON.parse(localStorage.getItem(GAME_KEY) || 'null'); } catch (e) { g = null; }
+    if (!g || typeof g !== 'object') g = {};
+    if (!g.days || typeof g.days !== 'object') g.days = {};
+    if (g.enabled === undefined) g.enabled = true;
+    if (!g.badges || typeof g.badges !== 'object') g.badges = {};
+    g.total = g.total || 0;
+    g.listsDone = g.listsDone || 0;
+    return g;
+  }
+
+  function saveGame() {
+    var cutoff = dayKey(daysAgo(GAME_KEEP_DAYS));
+    Object.keys(game.days).forEach(function (k) { if (k < cutoff) delete game.days[k]; });
+    try { localStorage.setItem(GAME_KEY, JSON.stringify(game)); } catch (e) {}
+  }
+
+  function daysAgo(n) {
+    var d = new Date();
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate() - n);
+  }
+
+  function dayKey(d) {
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  }
+
+  function recordCheck(delta) {
+    var k = todayStr();
+    var n = Math.max(0, (game.days[k] || 0) + delta);
+    if (n) game.days[k] = n; else delete game.days[k];
+    saveGame();
+  }
+
+  function activeDaysLast7() {
+    var n = 0;
+    for (var i = 0; i < 7; i++) if (game.days[dayKey(daysAgo(i))]) n++;
+    return n;
+  }
+
+  // Sequência com perdão: um dia sem atividade não quebra a sequência, desde
+  // que não tenha havido outro perdão nos 6 dias anteriores. Hoje ainda não
+  // acabou, então não conta contra você.
+  function currentStreak() {
+    var n = 0;
+    var lastForgive = -100;
+    var start = game.days[dayKey(daysAgo(0))] ? 0 : 1;
+    for (var i = start; i <= GAME_KEEP_DAYS; i++) {
+      if (game.days[dayKey(daysAgo(i))]) { n++; continue; }
+      if (i - lastForgive >= 7) { lastForgive = i; continue; }
+      break;
+    }
+    return n;
+  }
+
+  function vibrate(pattern) {
+    try { if (navigator.vibrate) navigator.vibrate(pattern); } catch (e) {}
+  }
+
+  var toastTimer = null;
+  function showToast(text) {
+    var el = document.getElementById('game-toast');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'game-toast';
+      el.className = 'game-toast';
+      el.setAttribute('role', 'status');
+      el.setAttribute('aria-live', 'polite');
+      document.body.appendChild(el);
+    }
+    el.textContent = text;
+    el.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { el.classList.remove('show'); }, 2200);
+  }
+
+  // Chamado depois que um item é marcado ou desmarcado numa lista.
+  function onItemToggled(list, item) {
+    if (!game.enabled) return;
+    if (!item.done) { game.total = Math.max(0, game.total - 1); recordCheck(-1); return; }
+    var firstOfDay = !game.days[todayStr()];
+    game.total++;
+    recordCheck(1);
+    justCheckedItemId = item.id;
+    var complete = list.items.length > 0 && list.items.every(function (i) { return i.done; });
+    if (complete) game.listsDone++;
+    var badge = unlockBadges();
+    if (badge) {
+      vibrate([20, 40, 20]);
+      showToast(badge.icon + ' Conquista: ' + badge.name);
+    } else if (complete) {
+      vibrate([20, 40, 20]);
+      showToast(CELEBRATIONS[Math.floor(Math.random() * CELEBRATIONS.length)]);
+    } else {
+      vibrate(12);
+      if (firstOfDay) showToast('Primeiro do dia! 🌱');
+    }
+  }
+
+  // Devolve a primeira conquista nova (ou null) e grava todas as desbloqueadas.
+  function unlockBadges() {
+    var first = null;
+    BADGES.forEach(function (b) {
+      if (game.badges[b.id] || !b.test(game)) return;
+      game.badges[b.id] = todayStr();
+      if (!first) first = b;
+    });
+    saveGame();
+    return first;
+  }
+
+  function renderDetailProgress(list) {
+    var box = document.getElementById('detail-progress');
+    var total = list.items.length;
+    var done = list.items.filter(function (i) { return i.done; }).length;
+    var left = total - done;
+    var html = '';
+    if (game.enabled && total > 0) {
+      var label = left === 0 ? 'Tudo feito! 🎉' : (left === 1 ? 'Falta só 1' : 'Faltam ' + left);
+      html +=
+        '<div class="detail-progress-label"><span>' + label + '</span><span>' + done + '/' + total + '</span></div>' +
+        '<div class="progress-bar big"><div style="width:' + Math.round((done / total) * 100) + '%"></div></div>';
+    }
+    var canFocus = canEditItems(list) && left > 0;
+    if (canFocus) html += '<button id="btn-focus" class="btn btn-secondary focus-btn">🎯 Modo foco: uma tarefa por vez</button>';
+    if (!html) { box.classList.add('hidden'); box.innerHTML = ''; return; }
+    box.classList.remove('hidden');
+    box.innerHTML = html;
+    if (canFocus) document.getElementById('btn-focus').addEventListener('click', function () { openFocusMode(list); });
+  }
+
+  // Modo foco: mostra só a próxima tarefa pendente, grande, com "Feito" e
+  // "Pular" (pular só muda a ordem de hoje, não mexe na lista).
+  function openFocusMode(list) {
+    var skipped = [];
+    function render() {
+      var pending = list.items.filter(function (i) { return !i.done; });
+      if (pending.length === 0) { closeModal(); renderDetail(); return; }
+      var candidates = pending.filter(function (i) { return skipped.indexOf(i.id) === -1; });
+      if (candidates.length === 0) { skipped = []; candidates = pending; }
+      var item = candidates[0];
+      openModal(
+        '<p class="hint" style="margin:0;">' + (pending.length === 1 ? 'Falta só 1' : 'Faltam ' + pending.length) +
+          ' · toque no texto para aumentar/diminuir a letra</p>' +
+        '<div id="focus-text" class="focus-text' + (game.focusLarge ? ' large' : '') + '"></div>' +
+        '<button id="m-focus-done" class="btn btn-primary">Feito ✓</button>' +
+        '<button id="m-focus-split" class="btn btn-secondary">Dividir em passos menores</button>' +
+        (pending.length > 1 ? '<button id="m-focus-skip" class="btn btn-secondary">Pular por agora</button>' : '') +
+        '<button id="m-cancel" class="btn btn-secondary">Sair do foco</button>'
+      );
+      document.getElementById('focus-text').textContent = item.text;
+      document.getElementById('m-focus-done').addEventListener('click', function () {
+        item.done = true;
+        save();
+        onItemToggled(list, item);
+        renderDetail();
+        justCheckedItemId = null;
+        render();
+      });
+      document.getElementById('m-focus-split').addEventListener('click', function () {
+        openSplitItem(list, item, render);
+      });
+      document.getElementById('focus-text').addEventListener('click', function () {
+        game.focusLarge = !game.focusLarge;
+        saveGame();
+        this.classList.toggle('large', game.focusLarge);
+      });
+      var skipBtn = document.getElementById('m-focus-skip');
+      if (skipBtn) skipBtn.addEventListener('click', function () { skipped.push(item.id); render(); });
+      document.getElementById('m-cancel').addEventListener('click', closeModal);
+    }
+    render();
+  }
+
+  // Convite gentil na primeira abertura do dia (nunca cobra nem conta o que faltou ontem).
+  function maybeGreet() {
+    if (!game.enabled || game.greetedOn === todayStr()) return;
+    var pending = 0;
+    state.lists.forEach(function (l) {
+      if (l.type === 'rotina') pending += l.items.filter(function (i) { return !i.done; }).length;
+    });
+    game.greetedOn = todayStr();
+    saveGame();
+    if (pending === 0) return;
+    var h = new Date().getHours();
+    var hi = h < 12 ? 'Bom dia!' : (h < 18 ? 'Boa tarde!' : 'Boa noite!');
+    showToast(hi + ' ' + (pending === 1 ? 'Tem 1 tarefa hoje.' : 'Tem ' + pending + ' tarefas hoje.') + ' Que tal começar por uma? 🌱');
+  }
+
+  // Troca uma tarefa grande por passos menores (um por linha), na mesma posição.
+  // O item original vai pra lixeira, então dá pra recuperar.
+  function openSplitItem(list, item, back) {
+    openModal(
+      '<h2>Dividir em passos</h2>' +
+      '<p class="hint" style="margin:0;">Escreva um passo por linha. Passos pequenos e concretos são mais fáceis de começar.</p>' +
+      '<textarea id="m-split-text" rows="5" placeholder="Ex.:&#10;Juntar a louça&#10;Lavar os copos&#10;Lavar as panelas"></textarea>' +
+      '<div class="modal-actions"><button id="m-split-cancel" class="btn btn-secondary">Voltar</button>' +
+      '<button id="m-split-save" class="btn btn-primary">Dividir</button></div>'
+    );
+    document.getElementById('m-split-cancel').addEventListener('click', back);
+    document.getElementById('m-split-save').addEventListener('click', function () {
+      var steps = document.getElementById('m-split-text').value.split('\n')
+        .map(function (t) { return t.trim(); }).filter(Boolean).slice(0, 15);
+      if (steps.length < 2) { alert('Escreva pelo menos 2 passos, um por linha.'); return; }
+      var idx = list.items.findIndex(function (i) { return i.id === item.id; });
+      var newItems = steps.map(function (t) { return { id: uid(), text: t, done: false }; });
+      moveItemToTrash(list, item);
+      Array.prototype.splice.apply(list.items, [Math.max(0, idx), 0].concat(newItems));
+      save();
+      renderDetail();
+      back();
+    });
+  }
+
+  function renderGameSummary() {
+    var box = document.getElementById('game-summary');
+    if (!game.enabled || state.lists.length === 0) { box.classList.add('hidden'); box.innerHTML = ''; return; }
+    var week = activeDaysLast7();
+    var streak = currentStreak();
+    var text = week === 0
+      ? '🌱 Marque um item para começar'
+      : '🌱 ' + week + (week === 1 ? ' dia ativo' : ' dias ativos') + ' nos últimos 7' +
+        (streak >= 2 ? ' · sequência de ' + streak : '');
+    box.classList.remove('hidden');
+    box.innerHTML = '<button id="btn-game-history" class="game-summary-btn">' + text + '<span aria-hidden="true">›</span></button>';
+    document.getElementById('btn-game-history').addEventListener('click', openGameHistory);
+  }
+
+  function openGameHistory() {
+    var WEEKS = 12;
+    var today = daysAgo(0);
+    var start = daysAgo(WEEKS * 7 - 7 + today.getDay()); // começa num domingo
+    var cells = '';
+    for (var i = 0; i < WEEKS * 7; i++) {
+      var d = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i);
+      if (d > today) { cells += '<span class="heat-cell future"></span>'; continue; }
+      var c = game.days[dayKey(d)] || 0;
+      var lvl = c === 0 ? 0 : (c <= 2 ? 1 : (c <= 5 ? 2 : 3));
+      cells += '<span class="heat-cell l' + lvl + '" title="' + dayKey(d) + ': ' + c + '"></span>';
+    }
+    var total = Object.keys(game.days).length;
+    var badgesHtml = BADGES.map(function (b) {
+      var got = !!game.badges[b.id];
+      return '<div class="badge' + (got ? '' : ' locked') + '"><span class="badge-icon">' + (got ? b.icon : '🔒') + '</span>' +
+        '<span><strong>' + b.name + '</strong><br><small>' + (got ? 'Conquistada!' : b.hint) + '</small></span></div>';
+    }).join('');
+    openModal(
+      '<h2>Seu histórico</h2>' +
+      '<div class="heatmap" aria-label="Dias com atividade nas últimas 12 semanas">' + cells + '</div>' +
+      '<p class="hint" style="margin:0;">' + total + (total === 1 ? ' dia ativo' : ' dias ativos') +
+        ' · sequência atual: ' + currentStreak() + '</p>' +
+      '<p class="hint" style="margin:0;">Um dia sem marcar nada não zera a sequência (você tem um perdão a cada 7 dias). ' +
+        'Cada quadradinho é um dia; quanto mais escuro, mais itens feitos.</p>' +
+      '<h3 style="margin:4px 0 0;font-size:15px;">Conquistas</h3>' +
+      '<div class="badges">' + badgesHtml + '</div>' +
+      '<button id="m-cancel" class="btn btn-secondary">Fechar</button>'
+    );
+    document.getElementById('m-cancel').addEventListener('click', closeModal);
+  }
+
   // ---------- navegação ----------
 
   var screenHome = document.getElementById('screen-home');
@@ -534,6 +818,7 @@
   }
 
   function renderHome() {
+    renderGameSummary();
     var container = document.getElementById('lists-container');
     container.innerHTML = '';
 
@@ -625,6 +910,7 @@
     if (list.role === 'viewer') hint = 'Você só pode ver esta lista (dono: ' + (list.ownerName || '?') + ').';
     else if (list.role === 'editor') hint = 'Você é editor: pode mexer nos itens. Dono: ' + (list.ownerName || '?') + '.';
     document.getElementById('detail-hint').textContent = hint;
+    renderDetailProgress(list);
     document.getElementById('add-item-form').classList.toggle('hidden', !editable);
     if (!editable) hideAddSuggestion();
 
@@ -667,7 +953,7 @@
 
     visibleItems.forEach(function (item) {
       var row = document.createElement('li');
-      row.className = 'item-row' + (item.done ? ' done' : '');
+      row.className = 'item-row' + (item.done ? ' done' : '') + (item.id === justCheckedItemId ? ' just-done' : '');
       row.innerHTML =
         '<div class="check">' + (item.done ? '✓' : '') + '</div>' +
         '<textarea class="text" rows="1" readonly></textarea>' +
@@ -687,7 +973,10 @@
       row.querySelector('.check').addEventListener('click', function () {
         item.done = !item.done;
         save();
+        justCheckedItemId = null;
+        onItemToggled(list, item);
         renderDetail();
+        justCheckedItemId = null;
       });
 
       textEl.addEventListener('input', function () { autoGrow(textEl); });
@@ -1252,6 +1541,8 @@
       '<div class="settings-row"><span>Importar backup (.json)</span><button id="m-import" class="btn btn-secondary" style="flex:none;">Importar</button></div>' +
       '<input id="m-import-file" type="file" accept="application/json" class="hidden" style="display:none;">' +
       '<div class="settings-row"><span>Verificar atualização do app</span><button id="m-check-update" class="btn btn-secondary" style="flex:none;">Verificar</button></div>' +
+      '<div class="settings-row"><span>Progresso e feedback ao marcar</span><button id="m-game-toggle" class="btn btn-secondary" style="flex:none;">' +
+        (game.enabled ? 'Desativar' : 'Ativar') + '</button></div>' +
       '<div class="settings-row"><span>Sugestão de categoria</span><button id="m-reset-learning" class="btn btn-secondary" style="flex:none;">Resetar aprendizado</button></div>' +
       '<div class="settings-row"><span>Bloqueio do app (Face ID/Touch ID)</span><button id="m-app-lock" class="btn btn-secondary" style="flex:none;">' +
         (isAppLockEnabled() ? 'Desativar' : 'Ativar') + '</button></div>' +
@@ -1281,6 +1572,13 @@
       enableAppLock().then(function (ok) {
         if (ok) { alert('Bloqueio ativado.'); closeModal(); }
       });
+    });
+
+    document.getElementById('m-game-toggle').addEventListener('click', function () {
+      game.enabled = !game.enabled;
+      saveGame();
+      closeModal();
+      if (currentListId) renderDetail(); else renderHome();
     });
 
     document.getElementById('m-reset-learning').addEventListener('click', function () {
@@ -2365,6 +2663,7 @@
 
   load();
   showHome();
+  maybeGreet();
   cloudTick();
   startCloudPolling();
   bootAccountFlow();
