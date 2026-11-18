@@ -95,6 +95,10 @@ O lembrete diário de cada lista é por pessoa: numa lista compartilhada, cada u
 
 O visual segue um design system próprio, todo em `styles.css`: tokens de cor (claro/escuro automático), espaçamento em múltiplos de 4px, escala de raios e de tipografia, elevação e movimento. Ícones são SVG de traço (`currentColor`), alvos de toque têm 44px (o círculo de marcar tem área estendida), modais são folhas que sobem de baixo e fecham arrastando a alça, e as telas têm transições curtas. Tudo respeita "reduzir movimento". Em telas largas o app fica centralizado em até 720px. Ao mexer em cores ou medidas, altere os tokens em `:root` em vez de valores soltos.
 
+### Identidade
+
+Conceito “papel e tinta”: índigo sobre papel quente, um único gesto de marca (o ✓ no círculo) e títulos em **Bitter** (OFL, embutida em `fonts/`), com texto na fonte do sistema. A referência viva está em `design.html` (lê os tokens reais). O respiro é um app irmão com identidade própria; os dois compartilham só a estrutura dos tokens, nenhum valor. O ícone vetorial é `icons/icon.svg`.
+
 ### Cores e ícone
 
 A paleta foi pensada para ser calma (útil para ansiedade e TDAH): fundo "papel" quente no claro e azul-noite no escuro (sem branco nem preto puros, para cansar menos a vista), **índigo** como cor de ação, **verde-sálvia** só para "feito" (sempre acompanhado do ✓ e do texto riscado, nunca só a cor), **coral fechado** apenas em ações destrutivas e **âmbar suave** para incentivo. Nada pisca nem usa vermelho de alerta para "atraso". Cada lista ganha um tom próprio no ícone, derivado do id, para ser reconhecida de relance. A barra de progresso é índigo enquanto avança e vira verde ao concluir. Todos os pares de texto e fundo passam no contraste WCAG AA (4,5:1).

@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Checklist Diário — identidade e design system</title>
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="styles.css">
+<style>
+  body { position: static; overflow: auto; height: auto; }
+  main { max-width: 720px; margin: 0 auto; padding: var(--s-6) var(--s-4) 80px; }
+  h1, h2, h3 { font-family: var(--font-titulo); letter-spacing: -.02em; }
+  h1 { font-size: var(--fs-2xl); margin: var(--s-2) 0; }
+  h2 { font-size: var(--fs-xl); margin: var(--s-8) 0 var(--s-3); }
+  p, li { color: var(--text-dim); line-height: 1.55; }
+  .brand { display: flex; align-items: center; gap: var(--s-4); }
+  .brand img { width: 72px; height: 72px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: var(--s-3); }
+  .sw { border-radius: var(--r-md); border: 1px solid var(--border); overflow: hidden; background: var(--surface); box-shadow: var(--shadow-1); }
+  .sw i { display: block; height: 56px; }
+  .sw b, .sw span { display: block; padding: 0 var(--s-3); font-size: var(--fs-sm); }
+  .sw b { padding-top: var(--s-2); color: var(--text); }
+  .sw span { padding-bottom: var(--s-2); color: var(--text-dim); font-family: ui-monospace, Menlo, monospace; font-size: var(--fs-xs); }
+  .row { display: flex; flex-wrap: wrap; gap: var(--s-3); align-items: center; }
+  .box { background: var(--accent-soft); border-radius: var(--r-md); padding: var(--s-3) var(--s-4); color: var(--text); font-size: var(--fs-sm); }
+  .card-demo { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg); box-shadow: var(--shadow-1); padding: var(--s-4); color: var(--text); }
+  .do li::marker { color: var(--done); } .dont li::marker { color: var(--danger); }
+</style>
+</head>
+<body>
+<main>
+  <div class="brand">
+    <img src="icons/icon.svg" alt="Ícone do Checklist Diário">
+    <div><p class="eyebrow" style="margin:0">Identidade e design system</p><h1>Checklist Diário</h1></div>
+  </div>
+  <p>Conceito: <b>papel e tinta</b>. Uma lista de papel bem organizada, com um único gesto de marca, o ✓ dentro do círculo. É o app do “fazer”: claro, prático e de ritmo firme. O irmão de tom calmo e respiratório é o respiro; os dois não compartilham valores de cor nem tipografia.</p>
+
+  <h2>Cor</h2>
+  <div class="grid" id="cores"></div>
+  <p>Regras: o verde-sálvia só significa “feito” e sempre vem com ✓ e texto riscado. O coral só aparece em ações destrutivas. Âmbar é incentivo, nunca alerta. Nada de vermelho para “atraso”. Pares de texto e fundo passam em contraste AA (4,5:1). Tema escuro automático: azul-noite, sem preto puro.</p>
+
+  <h2>Tipografia</h2>
+  <div class="card-demo">
+    <p style="margin:0" class="eyebrow">Títulos · Bitter 500–800 (OFL, embutida, offline)</p>
+    <div style="font-family:var(--font-titulo);font-weight:800;font-size:var(--fs-2xl);letter-spacing:-.02em;color:var(--text)">Casa, compras e contatos</div>
+    <p class="eyebrow" style="margin-top:var(--s-4)">Texto · fonte do sistema (rápida, familiar)</p>
+    <div style="color:var(--text)">Comprar pão, ligar para a mãe, regar as plantas.</div>
+  </div>
+  <p>Escala: 12 · 13 · 15 · 17 · 22 · 30 px (<code>--fs-xs</code> a <code>--fs-2xl</code>). Bitter só em títulos de tela e de folha; nunca em botões nem em itens de lista.</p>
+
+  <h2>Forma e espaço</h2>
+  <div class="row" id="raios"></div>
+  <p>Espaço em múltiplos de 4 px (<code>--s-1</code> a <code>--s-8</code>). Raios: 10 · 14 · 20 · 28 e pílula. Alvos de toque de 44 px; o círculo de marcar tem área estendida.</p>
+
+  <h2>Componentes-chave</h2>
+  <div class="row">
+    <button class="icon-btn" aria-label="Exemplo"><svg class="i" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
+    <span class="box">Folha, chip e destaque suave (<code>--accent-soft</code>)</span>
+  </div>
+
+  <h2>Tom dos textos</h2>
+  <ul class="do"><li>Direto e prático: “Feito. Próxima?”.</li><li>Incentivo leve, sem comparação com ontem.</li></ul>
+  <ul class="dont"><li>Sem culpa, sem “você falhou”, sem alarme.</li></ul>
+
+  <h2>Como mexer</h2>
+  <p>Altere os tokens em <code>:root</code> de <code>styles.css</code>, nunca valores soltos. Ícones: <code>npm run icons</code> (PNG) e <code>icons/icon.svg</code> (vetor). Fonte: <code>tools/gerar-fonte.py</code>.</p>
+</main>
+<script>
+  // lê os valores reais dos tokens, para a página nunca ficar fora de sincronia
+  var cs = getComputedStyle(document.documentElement);
+  var cores = [['--bg','Fundo (papel)'],['--surface','Superfície'],['--surface-2','Superfície 2'],['--text','Texto'],['--text-dim','Texto suave'],['--accent','Ação (índigo)'],['--done','Feito (sálvia)'],['--warm','Incentivo (âmbar)'],['--danger','Destrutivo (coral)']];
+  document.getElementById('cores').innerHTML = cores.map(function (c) {
+    var v = cs.getPropertyValue(c[0]).trim();
+    return '<div class="sw"><i style="background:var(' + c[0] + ')"></i><b>' + c[1] + '</b><span>' + c[0] + ' ' + v + '</span></div>';
+  }).join('');
+  document.getElementById('raios').innerHTML = ['sm','md','lg','xl','pill'].map(function (r) {
+    return '<div style="width:72px;height:72px;background:var(--accent-soft);border-radius:var(--r-' + r + ');display:grid;place-items:center;font-size:12px;color:var(--text)">' + r + '</div>';
+  }).join('');
+</script>
+</body>
+</html>

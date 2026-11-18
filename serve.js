@@ -6,7 +6,7 @@ const path = require('path');
 
 const MIME = {
   '.html': 'text/html', '.js': 'application/javascript', '.css': 'text/css',
-  '.json': 'application/json', '.png': 'image/png', '.ico': 'image/x-icon'
+  '.json': 'application/json', '.png': 'image/png', '.ico': 'image/x-icon', '.svg': 'image/svg+xml', '.woff': 'font/woff'
 };
 
 const root = __dirname;
