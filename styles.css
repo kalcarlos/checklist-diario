@@ -7,6 +7,16 @@
    ========================================================================== */
 
 /* 1. Tokens ---------------------------------------------------------------- */
+/* Tipografia de marca: Bitter (OFL), serifa de “papel”, só em títulos e números de destaque.
+   O texto corrido continua na fonte do sistema (rápido, offline, familiar). */
+@font-face {
+  font-family: "Bitter";
+  src: url("fonts/bitter.woff") format("woff");
+  font-weight: 500 800;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
   color-scheme: light dark;
 
@@ -46,6 +56,8 @@
   --r-sm: 10px; --r-md: 14px; --r-lg: 20px; --r-xl: 28px; --r-pill: 999px;
 
   /* tipografia */
+  --font-titulo: "Bitter", Georgia, "Times New Roman", serif;
+  --font-corpo: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Inter, sans-serif;
   --fs-xs: 12px; --fs-sm: 13px; --fs-md: 15px; --fs-lg: 17px; --fs-xl: 22px; --fs-2xl: 30px;
 
   /* movimento */
@@ -100,7 +112,7 @@ body {
   height: 100dvh;
   background: var(--bg);
   color: var(--text);
-  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Inter, sans-serif;
+  font-family: var(--font-corpo);
   font-size: var(--fs-md);
   line-height: 1.4;
   -webkit-font-smoothing: antialiased;
@@ -158,6 +170,8 @@ svg.i.sm { width: 18px; height: 18px; }
   position: relative;
   z-index: 2;
 }
+
+.topbar h1, .modal h2 { font-family: var(--font-titulo); }
 
 .topbar h1 {
   font-size: var(--fs-lg);

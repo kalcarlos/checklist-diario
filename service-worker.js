@@ -1,4 +1,4 @@
-var CACHE_NAME = 'checklist-diario-v37';
+var CACHE_NAME = 'checklist-diario-v38';
 var ASSETS = [
   './',
   './index.html',
@@ -10,7 +10,10 @@ var ASSETS = [
   './icons/icon-512.png',
   './icons/icon-maskable-512.png',
   './icons/apple-touch-icon.png',
-  './icons/favicon-32.png'
+  './icons/favicon-32.png',
+  './icons/icon.svg',
+  './fonts/bitter.woff',
+  './design.html'
 ];
 
 self.addEventListener('install', function (event) {
